@@ -13,5 +13,6 @@ Free, offline-ready hike planner built by Suhitha (GitHub: suhibug). Plain HTML,
 - Keep it free: only free, keyless APIs (Open-Meteo for weather and geocoding). No accounts, no API keys, no paid hosting.
 - Keep it simple to read. Suhitha is learning; prefer clear code and short comments over clever code.
 - Every estimate is labeled a rough guide. Never present a number as a safety guarantee.
+- Usage counting: GoatCounter (dashboard trailprep.goatcounter.com) via `track()` in app.js. Count actions and state/country only, never exact trails, places, or dates.
 - Never commit the raw survey CSV (it has respondents' names). Only share totals.
 - Test with `python3 -m http.server 8000` and open http://localhost:8000.

@@ -16,6 +16,13 @@ const parseLocal = (s) => new Date(s.length === 16 ? s + ":00Z" : s + "Z");
 const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
 const fmtDay = (d) => d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
+// ---------- Usage counts ----------
+// Anonymous counts through GoatCounter (no cookies, no names). Only the action and the
+// state or country are counted, never the exact trail, place, or date, to keep trips private.
+function track(name, title) {
+  try { window.goatcounter?.count?.({ path: name, title: title || name, event: true }); } catch {}
+}
+
 // ---------- Place search ----------
 // One box takes a trail name, landmark, peak, town, or coordinates.
 // Trails and landmarks come from OpenStreetMap (free; asks for at most 1 search per second).
@@ -37,6 +44,7 @@ async function osmSearch(q) {
   return (await res.json()).map((x) => ({
     name: x.name || x.display_name.split(",")[0],
     area: [x.address?.city || x.address?.town || x.address?.county, x.address?.state, x.address?.country_code?.toUpperCase()].filter(Boolean).join(", "),
+    region: x.address?.country_code === "us" ? x.address?.state : x.address?.country,
     type: OSM_TYPES[x.type] || "Place",
     latitude: +x.lat,
     longitude: +x.lon,
@@ -48,6 +56,7 @@ async function townSearch(q) {
   if (!res.ok) return [];
   return ((await res.json()).results || []).map((x) => ({
     name: x.name, area: [x.admin1, x.country_code].filter(Boolean).join(", "), type: "Town", latitude: x.latitude, longitude: x.longitude,
+    region: x.country_code === "US" ? x.admin1 : x.country,
   }));
 }
 
@@ -93,7 +102,7 @@ function placeLabel(p) {
 }
 
 function choosePlace(p) {
-  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude };
+  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, region: p.region || "Unknown" };
   $("place-results").innerHTML = "";
   $("place-chosen").textContent = `✓ ${state.place.name} (${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)})`;
 }
@@ -105,6 +114,7 @@ $("place-search").addEventListener("click", async () => {
   $("place-chosen").textContent = "";
   $("place-results").innerHTML = "<li>Searching trails, landmarks and towns…</li>";
   try {
+    track("search");
     const results = await searchPlaces(q);
     $("place-results").innerHTML = "";
     if (!results.length) {
@@ -180,6 +190,8 @@ $("plan-form").addEventListener("submit", async (e) => {
   $("plan-btn").textContent = "Getting the forecast…";
   try {
     state.forecast = await fetchForecast(state.place);
+    track(inputs.nights ? "plan-backpacking" : "plan-day-hike");
+    track(`region-${state.place.region}`, `Planned in ${state.place.region}`);
     state.inputs = inputs;
     render();
   } catch {
@@ -316,8 +328,9 @@ function render(savedName) {
     <p class="disclaimer">All estimates are a rough guide based on standard hiking rules of thumb and the forecast. Weather in the mountains changes fast. Check official sources (NWS, park and forest offices) and turn back if conditions change.</p>`;
 
   $("save-btn").addEventListener("click", saveTrip);
-  $("print-btn").addEventListener("click", () => window.print());
+  $("print-btn").addEventListener("click", () => { track("print"); window.print(); });
   $("sunrise-btn").addEventListener("click", () => {
+    track("sunrise-start");
     const t = p.light.sunriseAtTopStart;
     state.inputs = { ...inputs, date: t.toISOString().slice(0, 10), time: t.toISOString().slice(11, 16) };
     $("date").value = state.inputs.date;
@@ -348,6 +361,7 @@ function storeTrips(trips) {
 }
 
 function saveTrip() {
+  track("save-trip");
   const trips = loadTrips().filter((t) => !(t.place.name === state.place.name && t.inputs.date === state.inputs.date));
   trips.unshift({ id: Date.now(), savedAt: new Date().toISOString(), place: state.place, inputs: state.inputs, forecast: state.forecast });
   if (!storeTrips(trips.slice(0, 20))) return alert("Could not save on this device.");
