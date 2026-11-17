@@ -17,10 +17,16 @@ const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-di
 const fmtDay = (d) => d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 // ---------- Usage counts ----------
-// Anonymous counts through GoatCounter (no cookies, no names). Only the action and the
+// Anonymous counts through GoatCounter and Google Analytics 4 (no names). Only the action and the
 // state or country are counted, never the exact trail, place, or date, to keep trips private.
 function track(name, title) {
   try { window.goatcounter?.count?.({ path: name, title: title || name, event: true }); } catch {}
+  // GA4 event names allow only letters, numbers and underscores. Regions go in as a detail
+  // of one "plan_region" event instead of a new event name per state.
+  try {
+    if (name.startsWith("region-")) window.gtag?.("event", "plan_region", { region: name.slice(7) });
+    else window.gtag?.("event", name.replace(/-/g, "_"));
+  } catch {}
 }
 
 // ---------- Place search ----------

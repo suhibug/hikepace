@@ -1,7 +1,7 @@
 // Saves the app's files on the phone so Trail Prep opens without signal.
 // Online, it always loads the newest version; offline, it uses the saved copy.
-const CACHE = "trail-prep-v10";
-const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE = "trail-prep-v11";
+const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./analytics.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
   // "reload" skips the browser's short-term cache so we save the newest files, not old ones.
