@@ -127,7 +127,7 @@ export function gearChecklist(w) {
   ];
   const add = (item, why) => items.push({ item, why });
 
-  if (w.headlamp) add("Headlamp", w.headlampWhy);
+  if (w.headlamp) add("Headlamp, fully charged, plus spare batteries or a cable", `${w.headlampWhy} Charge it the night before: a dead headlamp on a dark descent is a real danger.`);
   if (w.maxUv >= 3 || w.maxFeelsF >= 75) add("Sunscreen, sunglasses and a sun hat", `UV index up to ${Math.round(w.maxUv)}.`);
   if (w.maxFeelsF >= 85) add("Electrolytes or salty snacks", `Feels like up to ${Math.round(w.maxFeelsF)}°F. You will sweat out salt, not just water.`);
   if (w.minFeelsF < 60) add("Warm mid-layer (fleece or light puffy)", `Feels like ${Math.round(w.minFeelsF)}°F at the coldest point, including at the top.`);
