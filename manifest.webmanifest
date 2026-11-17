@@ -1,0 +1,13 @@
+{
+  "name": "Trail Prep",
+  "short_name": "Trail Prep",
+  "description": "Free hike planner: time, daylight, weather, water and food. Works offline.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#2f5d50",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

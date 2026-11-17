@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trail Prep</title>
+  <meta name="description" content="Free hike planner: time on trail, daylight, weather at the top, and how much water and food to bring. Works offline.">
+  <meta name="theme-color" content="#2f5d50">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <img src="icon.svg" alt="" width="40" height="40">
+    <div>
+      <h1>Trail Prep</h1>
+      <p>Know your time, daylight, weather, water and food before you go.</p>
+    </div>
+  </header>
+
+  <main>
+    <div id="offline-note" class="alert warn" hidden>You're offline. Your saved trips below still work.</div>
+
+    <form id="plan-form" class="panel">
+      <h2>Plan a hike</h2>
+
+      <label for="place">Trailhead or nearest town</label>
+      <div class="row">
+        <input id="place" placeholder="e.g. Flagstaff, or 35.346, -111.678" autocomplete="off">
+        <button type="button" id="place-search">Search</button>
+        <button type="button" id="place-gps" class="secondary" title="Use my location">📍</button>
+      </div>
+      <ul id="place-results" class="place-results"></ul>
+      <p id="place-chosen" class="chosen"></p>
+
+      <div class="grid">
+        <div><label for="miles">Total distance (miles)</label><input id="miles" type="number" min="0.1" step="0.1" required></div>
+        <div><label for="gain">Elevation gain (feet)</label><input id="gain" type="number" min="0" step="10" value="0"></div>
+        <div><label for="date">Date</label><input id="date" type="date" required></div>
+        <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
+        <div><label for="nights">Trip type</label>
+          <select id="nights">
+            <option value="0">Day hike</option>
+            <option value="1">Backpacking, 1 night</option>
+            <option value="2">Backpacking, 2 nights</option>
+            <option value="3">Backpacking, 3 nights</option>
+          </select></div>
+        <div><label for="pace">Your pace</label>
+          <select id="pace">
+            <option value="relaxed">Relaxed</option>
+            <option value="average" selected>Average</option>
+            <option value="fast">Fast</option>
+          </select></div>
+        <div><label for="group">People in the group</label><input id="group" type="number" min="1" max="20" value="1"></div>
+      </div>
+      <p class="small muted">Tip: copy distance and elevation gain from AllTrails or your trail map.</p>
+      <button id="plan-btn" type="submit" class="primary">Plan my hike</button>
+    </form>
+
+    <section id="results" class="panel" hidden aria-live="polite"></section>
+
+    <section id="saved" class="panel no-print" hidden>
+      <h2>Saved trips (work offline)</h2>
+      <ul id="saved-list" class="saved-list"></ul>
+    </section>
+  </main>
+
+  <footer class="no-print">
+    Free and open source. Weather by <a href="https://open-meteo.com/">Open-Meteo</a>.
+    Estimates are a rough guide, not a safety guarantee.
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
