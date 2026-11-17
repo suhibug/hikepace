@@ -17,21 +17,83 @@ const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-di
 const fmtDay = (d) => d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 // ---------- Place search ----------
+// One box takes a trail name, landmark, peak, town, or coordinates.
+// Trails and landmarks come from OpenStreetMap (free; asks for at most 1 search per second).
+// Towns come from Open-Meteo as a backup.
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const OSM_TYPES = {
+  path: "Trail", footway: "Trail", track: "Trail", bridleway: "Trail", trailhead: "Trailhead",
+  peak: "Peak", saddle: "Pass", ridge: "Ridge", cliff: "Cliff", spring: "Spring", waterfall: "Waterfall",
+  attraction: "Landmark", viewpoint: "Viewpoint", camp_site: "Campground", picnic_site: "Picnic area",
+  parking: "Parking", nature_reserve: "Park", national_park: "Park", protected_area: "Park", park: "Park",
+  city: "Town", town: "Town", village: "Town", hamlet: "Town", administrative: "Town",
+};
+
+async function osmSearch(q) {
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  if (!res.ok) return [];
+  return (await res.json()).map((x) => ({
+    name: x.name || x.display_name.split(",")[0],
+    area: [x.address?.city || x.address?.town || x.address?.county, x.address?.state, x.address?.country_code?.toUpperCase()].filter(Boolean).join(", "),
+    type: OSM_TYPES[x.type] || "Place",
+    latitude: +x.lat,
+    longitude: +x.lon,
+  }));
+}
+
+async function townSearch(q) {
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name=${encodeURIComponent(q)}`);
+  if (!res.ok) return [];
+  return ((await res.json()).results || []).map((x) => ({
+    name: x.name, area: [x.admin1, x.country_code].filter(Boolean).join(", "), type: "Town", latitude: x.latitude, longitude: x.longitude,
+  }));
+}
+
+// AllTrails-style names ("Seven Sacred Pools via Soldier Pass to Brins Mesa Loop, Arizona")
+// are not one place on any map, so split them into the places they mention.
+function trailPieces(query) {
+  const [main, ...rest] = query.split(",");
+  const region = rest.join(",").trim();
+  const pieces = main
+    .split(/\s+(?:via|to|and|from|&|\+)\s+|\s+-\s+/i)
+    .map((s) => s.replace(/\b(loop|out and back|out-and-back|trailhead|hike)\b/gi, "").trim())
+    .filter((s) => s.length > 2);
+  return { pieces: pieces.slice(0, 4), region };
+}
+
 async function searchPlaces(query) {
   const coords = query.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if (coords) return [{ name: "Custom point", latitude: +coords[1], longitude: +coords[2] }];
-  const url = `https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Place search failed");
-  return (await res.json()).results || [];
+  if (coords) return [{ name: "Custom point", area: "", type: "Coordinates", latitude: +coords[1], longitude: +coords[2] }];
+
+  let results = await osmSearch(query);
+  if (!results.length) {
+    const { pieces, region } = trailPieces(query);
+    if (pieces.length > 1 || pieces[0] !== query) {
+      for (const piece of pieces) {
+        await wait(1100); // be polite to OpenStreetMap's free service
+        const found = await osmSearch(region ? `${piece}, ${region}` : piece);
+        results.push(...found.map((r) => ({ ...r, matched: piece })));
+      }
+    }
+  }
+  if (!results.length) results = await townSearch(query.split(",")[0]);
+
+  // Drop near-duplicates (same spot found twice).
+  const seen = new Set();
+  return results.filter((r) => {
+    const key = `${r.latitude.toFixed(3)},${r.longitude.toFixed(3)}`;
+    return seen.has(key) ? false : seen.add(key);
+  }).slice(0, 8);
 }
 
 function placeLabel(p) {
-  return [p.name, p.admin1, p.country_code].filter(Boolean).join(", ");
+  return `${p.name}${p.area ? ` · ${p.area}` : ""}`;
 }
 
 function choosePlace(p) {
-  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, elevationM: p.elevation ?? null };
+  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude };
   $("place-results").innerHTML = "";
   $("place-chosen").textContent = `✓ ${state.place.name} (${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)})`;
 }
@@ -39,20 +101,30 @@ function choosePlace(p) {
 $("place-search").addEventListener("click", async () => {
   const q = $("place").value.trim();
   if (!q) return;
-  $("place-results").innerHTML = "<li>Searching…</li>";
+  state.place = null;
+  $("place-chosen").textContent = "";
+  $("place-results").innerHTML = "<li>Searching trails, landmarks and towns…</li>";
   try {
     const results = await searchPlaces(q);
     $("place-results").innerHTML = "";
     if (!results.length) {
-      $("place-results").innerHTML = "<li>No match. Try the nearest town or park, or paste coordinates like 35.346, -111.678.</li>";
+      $("place-results").innerHTML = "<li>No match. Try one landmark on the trail (like a peak or the trailhead), the nearest town, or paste coordinates like 34.885, -111.782.</li>";
       return;
     }
-    if (results.length === 1) return choosePlace(results[0]);
+    if (results.length === 1 && !results[0].matched) return choosePlace(results[0]);
+    if (results.some((r) => r.matched)) {
+      $("place-results").innerHTML = "<li>No exact match for the full name, so here are places on your trail. Pick the one closest to where you start.</li>";
+    }
     for (const r of results) {
       const li = document.createElement("li");
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = placeLabel(r);
+      b.innerHTML = `<b></b> <span class="tag"></span><br><span class="small muted"></span>`;
+      b.querySelector("b").textContent = r.name;
+      // Skip the tag when the name already says it ("Soldier Pass" is already a pass).
+      if (!r.name.toLowerCase().includes(r.type.toLowerCase())) b.querySelector(".tag").textContent = r.type;
+      else b.querySelector(".tag").remove();
+      b.querySelector(".muted").textContent = r.area;
       b.addEventListener("click", () => choosePlace(r));
       li.appendChild(b);
       $("place-results").appendChild(li);
@@ -60,6 +132,9 @@ $("place-search").addEventListener("click", async () => {
   } catch {
     $("place-results").innerHTML = "<li>Could not search. Are you online?</li>";
   }
+});
+$("place").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("place-search").click(); }
 });
 
 $("place-gps").addEventListener("click", () => {

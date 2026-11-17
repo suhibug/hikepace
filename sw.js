@@ -1,6 +1,6 @@
 // Saves the app's files on the phone so Trail Prep opens without signal.
 // Bump the version whenever any of these files change, so phones pick up the update.
-const CACHE = "trail-prep-v1";
+const CACHE = "trail-prep-v3";
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
