@@ -6,7 +6,7 @@ Free, offline-ready hike planner built by Suhitha (GitHub: suhibug). Plain HTML,
 - `index.html`: the page and form
 - `app.js`: page logic: place search, forecast fetch, rendering, saved trips (localStorage)
 - `calc.js`: all estimate math as pure functions (time, water, food, daylight, gear, warnings)
-- `sw.js`: service worker that caches the app files for offline use. **Bump `CACHE` version whenever any cached file changes.**
+- `sw.js`: service worker. Network-first (online always gets the newest files), falls back to the saved copy offline. Bump `CACHE` when the file list changes.
 - `manifest.webmanifest`, `icon.svg`: lets phones install it to the home screen
 
 ## Rules
