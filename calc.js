@@ -19,9 +19,16 @@ export function effortHours(miles, gainFt, descentFt = 0) {
   return (miles / 3 + gainFt / 2000 + descentFt / 6000) * (7 / 6);
 }
 
+// Thin air: above about 6,000 ft most people slow down, roughly 6% more per 1,000 ft.
+// Uses the middle of the climb (trailhead plus half the climb). Capped so it never more than doubles.
+export function altitudeFactor(trailheadFt, climbFt = 0) {
+  const middle = (trailheadFt || 0) + climbFt / 2;
+  return middle <= 6000 ? 1 : Math.min(1.5, 1 + 0.06 * ((middle - 6000) / 1000));
+}
+
 // A pace is either a preset ({ factor }) or learned from a past climb ({ ref: { miles, gainFt, hours } }).
 export function paceFactor(pace) {
-  return pace.ref ? pace.ref.hours / effortHours(pace.ref.miles, pace.ref.gainFt) : pace.factor;
+  return pace.ref ? pace.ref.hours / refEffort(pace.ref) : pace.factor;
 }
 
 // Plain-English version of a pace, e.g. "about 2.3 mph on flat ground, plus 1 hour for every 1,540 ft of climbing".
@@ -31,12 +38,18 @@ export function describePace(factor) {
   return `about ${mph.toFixed(1)} mph on flat ground, plus 1 hour for every ${ftPerHour.toLocaleString()} ft of climbing`;
 }
 
+// Effort of the climb we learned a pace from, with its own altitude taken out
+// (if we know it), so a climb done high up isn't mistaken for a slow hiker.
+function refEffort(ref) {
+  return effortHours(ref.miles, ref.gainFt) * altitudeFactor(ref.elevFt, ref.gainFt);
+}
+
 // Turns effort hours into a real time range for this hiker:
 //   best  = you keep your pace the whole way
 //   worst = you get tired. People slow down more the longer the day, so the gap grows with length.
 export function timeRange(effort, pace) {
   if (pace.ref) {
-    const ratio = effort / effortHours(pace.ref.miles, pace.ref.gainFt);
+    const ratio = effort / refEffort(pace.ref);
     if (ratio <= 1) {
       const best = pace.ref.hours * ratio;
       return { best, worst: best * 1.15 };
@@ -61,17 +74,19 @@ export const ENDINGS = {
 export const END_TYPES = { tram: "tram", shuttle: "shuttle", car: "car pickup" };
 
 // The whole hike: the way up to the top (or turnaround point), then the way back or down to the end.
-export function estimateHike({ upMiles, upGainFt, ending, backMiles = 0, backGainFt = 0, pace, heavyPack = false, days = 1 }) {
+export function estimateHike({ upMiles, upGainFt, ending, backMiles = 0, backGainFt = 0, pace, heavyPack = false, days = 1, trailheadFt = 0 }) {
   const returnMiles = ending === "outback" ? upMiles : backMiles;
   // Back at the start, you've come down everything you climbed. When the hike ends at a tram
   // or car we don't know how far down that is, so no descent time is added.
   const descentFt = ending === "oneway" ? 0 : upGainFt + backGainFt;
   const pack = heavyPack ? 1.15 : 1; // a full backpacking pack slows everyone down
-  const effortTop = effortHours(upMiles, upGainFt) * pack;
-  const effortAll = effortHours(upMiles + returnMiles, upGainFt + backGainFt, descentFt) * pack;
+  const altitude = altitudeFactor(trailheadFt, upGainFt);
+  const effortTop = effortHours(upMiles, upGainFt) * pack * altitude;
+  const effortAll = effortHours(upMiles + returnMiles, upGainFt + backGainFt, descentFt) * pack * altitude;
   return {
     totalMiles: round1(upMiles + returnMiles),
     totalGainFt: Math.round(upGainFt + backGainFt),
+    altitudeSlowdown: Math.round((altitude - 1) * 100), // percent
     top: timeRange(effortTop, pace),
     finish: timeRange(effortAll / days, pace), // per hiking day on backpacking trips
   };
@@ -94,66 +109,77 @@ function waterRatePerHour(maxFeelsF) {
   return [0.35, 0.5];
 }
 
-export function estimateWater({ totalHours, gainFt, maxFeelsF, nights = 0 }) {
+export function estimateWater({ hoursLow, hoursHigh, gainFt, maxFeelsF, nights = 0, cooking = true }) {
   const [lo, hi] = waterRatePerHour(maxFeelsF);
   const climbBonus = gainFt >= 2000 ? 0.25 : 0;           // big climbs make you sweat more
-  const hikeLow = totalHours * lo + climbBonus;
-  const hikeHigh = totalHours * hi + climbBonus;
-  // Camp needs: drinking at night and in the morning, plus cooking.
-  const campPerNight = nights > 0 ? [2, 3] : [0, 0];
-  return {
-    low: round1(hikeLow + campPerNight[0] * nights),
-    high: round1(hikeHigh + campPerNight[1] * nights),
-    perHour: [lo, hi],
-  };
+  // Camp, per night: drinking in the evening and morning, plus water for cooking dinner and breakfast.
+  const camp = cooking ? [2, 3] : [1, 1.5];
+  const hike = [round1(hoursLow * lo + climbBonus), round1(hoursHigh * hi + climbBonus)];
+  const atCamp = [round1(camp[0] * nights), round1(camp[1] * nights)];
+  return { hike, camp: atCamp, total: [round1(hike[0] + atCamp[0]), round1(hike[1] + atCamp[1])], perHour: [lo, hi] };
 }
 
 // ---------- Food ----------
 
-// Day hikes: pack about 200-300 calories of snacks per hour on the trail.
-// Overnight: about 2,500-4,000 calories per full day, which is roughly 1.5-2 lb of food.
-export function estimateFood({ totalHours, nights = 0, minFeelsF }) {
-  const coldBoost = minFeelsF < 40 ? 1.1 : 1;            // your body burns more to stay warm
-  if (nights === 0) {
-    return {
-      kind: "snacks",
-      caloriesLow: roundTo(totalHours * 200 * coldBoost, 50),
-      caloriesHigh: roundTo(totalHours * 300 * coldBoost, 50),
-    };
-  }
-  const days = nights + 1;
-  return {
-    kind: "trip",
-    caloriesLow: roundTo(days * 2500 * coldBoost, 100),
-    caloriesHigh: roundTo(days * 4000 * coldBoost, 100),
-    poundsLow: round1(days * 1.5),
-    poundsHigh: round1(days * 2),
-  };
+// What to pack, not what you burn:
+//   snacks while hiking: about 200-300 calories per hour on the trail
+//   at camp, per night: dinner about 600-900 and breakfast about 400-600 calories
+// Backpacking food averages about 100-125 calories per ounce, so 1,600-2,000 calories is about 1 lb.
+export function estimateFood({ hoursLow, hoursHigh, nights = 0, minFeelsF }) {
+  const cold = minFeelsF < 40 ? 1.1 : 1; // your body burns more to stay warm
+  const snacks = [roundTo(hoursLow * 200 * cold, 50), roundTo(hoursHigh * 300 * cold, 50)];
+  const meals = [roundTo(nights * 1000 * cold, 50), roundTo(nights * 1500 * cold, 50)];
+  const total = [snacks[0] + meals[0], snacks[1] + meals[1]];
+  return { snacks, meals, total, pounds: [round1(total[0] / 2000), round1(total[1] / 1600)] };
 }
 
 // ---------- Gear and layers ----------
 
-// Takes a summary of the weather during the hike and returns a checklist with reasons.
+// Takes a summary of the conditions and returns a grouped checklist, each item with its reason.
 export function gearChecklist(w) {
-  const items = [
-    { item: "Map or downloaded trail (offline)", why: "Phone signal often drops on trails." },
-    { item: "First-aid kit", why: "Always." },
-    { item: "Phone and a charged battery pack", why: "Always." },
-  ];
-  const add = (item, why) => items.push({ item, why });
+  const items = [];
+  const add = (group, item, why) => items.push({ group, item, why });
+  const f = (x) => Math.round(x);
+  const snowy = w.snowDuring || w.snowRecentCm >= 1;
+  const icy = snowy || (w.minTempTopF <= 32 && w.maxRainChance >= 30);
 
-  if (w.headlamp) add("Headlamp, fully charged, plus spare batteries or a cable", `${w.headlampWhy} Charge it the night before: a dead headlamp on a dark descent is a real danger.`);
-  if (w.maxUv >= 3 || w.maxFeelsF >= 75) add("Sunscreen, sunglasses and a sun hat", `UV index up to ${Math.round(w.maxUv)}.`);
-  if (w.maxFeelsF >= 85) add("Electrolytes or salty snacks", `Feels like up to ${Math.round(w.maxFeelsF)}°F. You will sweat out salt, not just water.`);
-  if (w.minFeelsF < 60) add("Warm mid-layer (fleece or light puffy)", `Feels like ${Math.round(w.minFeelsF)}°F at the coldest point, including at the top.`);
-  if (w.minFeelsF < 40) add("Warm hat and gloves", `Feels like ${Math.round(w.minFeelsF)}°F. Hands and ears get cold first.`);
-  if (w.maxGustMph >= 20) add("Wind shell", `Gusts up to ${Math.round(w.maxGustMph)} mph. A rain shell works but you may sweat more.`);
-  if (w.maxRainChance >= 30) add("Rain shell and a pack cover or liner", `Up to ${Math.round(w.maxRainChance)}% chance of rain.`);
-  if (w.maxRainChance >= 50) add("Waterproof shoes or extra socks", "Wet feet get cold and blister fast.");
-  if (w.thunder) add("A turnaround time before storms", "Thunderstorms are possible. Plan to be off peaks and open ridges early.");
-  if (w.nights > 0 && w.nightLowF !== null) {
-    const bag = Math.floor((w.nightLowF - 10) / 5) * 5;
-    add(`Sleeping bag rated about ${bag}°F`, `Night low near ${Math.round(w.nightLowF)}°F at camp. A much warmer bag can be just as bad: you will sweat and sleep poorly.`);
+  // Essentials
+  add("Essentials", "Map or downloaded trail (offline)", "Phone signal often drops on trails.");
+  add("Essentials", "First-aid kit", "Always.");
+  add("Essentials", "Phone and a charged battery pack", "Always.");
+  add("Essentials", "Tell someone your plan and when you'll be back", "If something goes wrong, someone knows where to look.");
+  if (w.headlamp) add("Essentials", "Headlamp, fully charged, plus spare batteries or a cable", `${w.headlampWhy} Charge it the night before: a dead headlamp on a dark descent is a real danger.`);
+  if (w.maxUv >= 3 || w.maxFeelsF >= 75 || snowy) add("Essentials", "Sunscreen, sunglasses and a sun hat", snowy ? "Snow reflects sunlight, so you can burn even when it's cold." : `UV index up to ${f(w.maxUv)}.`);
+  if (w.maxFeelsF >= 85) add("Essentials", "Electrolytes or salty snacks", `Feels like up to ${f(w.maxFeelsF)}°F. You will sweat out salt, not just water.`);
+
+  // Clothing
+  if (w.minFeelsF < 45) add("Clothing", "Base layer (wool or synthetic, not cotton)", "Cotton stays wet and pulls heat from your body.");
+  if (w.minFeelsF < 60) add("Clothing", "Warm mid-layer (fleece or light puffy)", `Feels like ${f(w.minFeelsF)}°F at the coldest point, including at the top.`);
+  if (w.minFeelsF < 32) add("Clothing", "Insulated puffy jacket", `Feels like ${f(w.minFeelsF)}°F. Put it on at every stop, before you get cold.`);
+  if (w.minFeelsF < 40) add("Clothing", "Warm hat and gloves", `Feels like ${f(w.minFeelsF)}°F. Hands and ears get cold first.`);
+  if (w.minFeelsF < 15) add("Clothing", "Hand warmers and spare gloves", `Feels like ${f(w.minFeelsF)}°F. Damp gloves stop working.`);
+  if (w.maxGustMph >= 20) add("Clothing", "Wind shell", `Gusts up to ${f(w.maxGustMph)} mph. A rain shell works but you may sweat more.`);
+  if (w.maxRainChance >= 30) add("Clothing", "Rain shell and a pack cover or liner", `Up to ${f(w.maxRainChance)}% chance of rain.`);
+  if (w.maxRainChance >= 50 || snowy) add("Clothing", "Waterproof shoes or extra socks", "Wet feet get cold and blister fast.");
+  if (snowy) add("Clothing", "Gaiters", "They keep snow out of your shoes.");
+
+  // Traction and safety
+  if (icy) add("Traction & safety", "Microspikes (traction for snow and ice)",
+    w.snowDuring ? "Snow is in the forecast during your hike." : w.snowRecentCm >= 1 ? `About ${f(w.snowRecentCm)} cm of snow fell near the trailhead in the last 3 days, and higher up there is usually more.` : "Below freezing at the top with rain or snow possible, so the trail may be icy.");
+  if (w.totalGainFt >= 2000 || snowy) add("Traction & safety", "Trekking poles", snowy ? "Extra balance on snow and ice." : `${w.totalGainFt.toLocaleString()} ft of climbing. Poles save your knees on the way down.`);
+  if (snowy && w.topFt >= 8000) add("Traction & safety", "Check the avalanche forecast (avalanche.org)", "Recent snow on high, steep slopes can slide. Avoid steep snowy slopes if you're unsure.");
+  if (w.thunder) add("Traction & safety", "A turnaround time before storms", "Thunderstorms are possible. Plan to be off peaks and open ridges early.");
+
+  // Camp
+  if (w.nights > 0) {
+    add("Camp", "Water filter or purification tablets", "Refill from streams and lakes instead of carrying it all.");
+    if (w.cooking) add("Camp", "Stove, fuel and a lighter", w.nightLowF !== null && w.nightLowF < 32 ? "Below freezing, gas canisters weaken. Bring extra fuel and keep the canister in your sleeping bag overnight." : "For dinner and breakfast.");
+    if (w.nightLowF !== null) {
+      const bag = Math.floor((w.nightLowF - 10) / 5) * 5;
+      add("Camp", `Sleeping bag rated about ${bag}°F`, `Night low near ${f(w.nightLowF)}°F at camp. A much warmer bag can be just as bad: you will sweat and sleep poorly.`);
+      if (w.nightLowF < 40) add("Camp", "Insulated sleeping pad (R-value 4 or higher)", "The cold ground takes more heat than the air does.");
+      if (w.nightLowF < 32) add("Camp", "Keep water from freezing", "Use an insulated bottle, or store bottles upside down and inside your tent.");
+    }
   }
   return items;
 }

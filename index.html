@@ -23,7 +23,7 @@
   <main>
     <div id="offline-note" class="alert warn" hidden>You're offline. Your saved trips below still work.</div>
 
-    <form id="plan-form" class="panel">
+    <form id="plan-form" class="panel" novalidate>
       <h2>Plan a hike</h2>
 
       <div class="import">
@@ -46,9 +46,11 @@
 
       <h3 class="step">The way up</h3>
       <div class="grid">
-        <div><label for="up-miles">Miles to the top</label><input id="up-miles" type="number" min="0.1" step="0.1" placeholder="e.g. 16" required>
+        <div><label for="up-miles">Miles to the top</label><input id="up-miles" type="number" min="0.1" step="any" placeholder="e.g. 16" required>
           <p class="small muted hint-under">Or to the turnaround point if there's no peak.</p></div>
-        <div><label for="up-gain">Climb to the top (feet)</label><input id="up-gain" type="number" min="0" step="10" placeholder="e.g. 10400"></div>
+        <div><label for="up-gain">Climb to the top (feet)</label><input id="up-gain" type="number" min="0" step="any" placeholder="e.g. 10400"></div>
+        <div><label for="trailhead-elev">Trailhead elevation (feet)</label><input id="trailhead-elev" type="number" min="-300" step="any" placeholder="Filled in when you pick a place">
+          <p id="elev-note" class="small muted hint-under">Above 6,000 ft, thinner air slows most people down, so Trail Prep adds time.</p></div>
       </div>
 
       <h3 class="step">The way back</h3>
@@ -65,8 +67,8 @@
             <option value="shuttle">Shuttle or bus</option>
             <option value="car">A car picking me up</option>
           </select></div>
-        <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="0.1" placeholder="e.g. 5.5"></div>
-        <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (feet, optional)</label><input id="back-gain" type="number" min="0" step="10" placeholder="0"></div>
+        <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="any" placeholder="e.g. 5.5"></div>
+        <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (feet, optional)</label><input id="back-gain" type="number" min="0" step="any" placeholder="0"></div>
         <div id="last-time-wrap" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time">
           <p class="small muted hint-under">Check their website. Trail Prep warns you if you might miss it.</p></div>
       </div>
@@ -82,7 +84,8 @@
             <option value="1">Backpacking, 1 night</option>
             <option value="2">Backpacking, 2 nights</option>
             <option value="3">Backpacking, 3 nights</option>
-          </select></div>
+          </select>
+          <label id="cooking-wrap" class="check" hidden><input type="checkbox" id="cooking" checked> I'll cook at camp (stove)</label></div>
         <div><label for="pace">Your pace</label>
           <select id="pace">
             <option value="relaxed">Relaxed</option>
@@ -97,9 +100,9 @@
         <b>Teach Trail Prep your pace</b>
         <p class="small muted">Use the way up of a hike you already did. Long breaks at the top don't count. If you recorded a hike on a watch or app, import its GPX above and it reads the times for you.</p>
         <div class="grid">
-          <div><label for="past-miles">Miles to the top</label><input id="past-miles" type="number" min="0.1" step="0.1" placeholder="e.g. 3"></div>
-          <div><label for="past-gain">Climb to the top (feet)</label><input id="past-gain" type="number" min="0" step="10" placeholder="e.g. 2600"></div>
-          <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="0.25" placeholder="e.g. 1.5"></div>
+          <div><label for="past-miles">Miles to the top</label><input id="past-miles" type="number" min="0.1" step="any" placeholder="e.g. 3"></div>
+          <div><label for="past-gain">Climb to the top (feet)</label><input id="past-gain" type="number" min="0" step="any" placeholder="e.g. 2600"></div>
+          <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="any" placeholder="e.g. 1.5"></div>
         </div>
         <button type="button" id="past-save" class="secondary">Save my pace</button>
         <p id="past-result" class="small"></p>

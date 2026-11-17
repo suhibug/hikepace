@@ -49,9 +49,11 @@ All numbers are rough guides, and the app says so.
   - **Average:** about 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing
   - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
   - **Your own pace:** learned from the way up of a climb you already did. For hikes much longer than that climb, Trail Prep scales the time the way endurance runners do (Riegel's formula) and adds a "getting tired" case.
+- **Altitude:** above about 6,000 ft, thinner air slows most people down, so times get about 6% longer per 1,000 ft (measured at the middle of the climb). The trailhead elevation is filled in for you and can be corrected.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
-- **Water:** 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature, more for big climbs, plus 2 to 3 liters per night at camp.
-- **Food:** 200 to 300 calories per hour of hiking on day hikes; 2,500 to 4,000 calories (1.5 to 2 lb) per day when backpacking; 10% more in the cold.
+- **Water:** to drink while hiking, 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature (a bit more for big climbs). Backpacking adds camp water: 2 to 3 liters per night with cooking, 1 to 1.5 without.
+- **Food (what to pack):** trail snacks of 200 to 300 calories per hour of hiking, plus dinner (600 to 900) and breakfast (400 to 600) for each night; 10% more in the cold. Backpacking food is about 1,600 to 2,000 calories per pound.
+- **Pack list:** grouped into essentials, clothing, traction and safety, and camp. It looks at the forecast and the last 3 days of snow, so it suggests things like microspikes, gaiters, or checking the avalanche forecast when there's recent snow up high.
 
 The formulas live in `calc.js` so they're easy to read and change.
 

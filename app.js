@@ -39,7 +39,8 @@ const OSM_TYPES = {
 
 async function osmSearch(q) {
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(q)}`;
-  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  let res;
+  try { res = await fetch(url, { headers: { "Accept-Language": "en" } }); } catch { return []; } // busy or offline: fall back to towns
   if (!res.ok) return [];
   return (await res.json()).map((x) => ({
     name: x.name || x.display_name.split(",")[0],
@@ -105,6 +106,25 @@ function choosePlace(p) {
   state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, region: p.region || "Unknown" };
   $("place-results").innerHTML = "";
   $("place-chosen").textContent = `✓ ${state.place.name} (${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)})`;
+  if (Number.isFinite(p.elevFt)) return setTrailheadElev(p.elevFt, "From your GPX file.");
+  lookUpElevation(p.latitude, p.longitude);
+}
+
+// Fill in the starting elevation (used for thin-air time) and say where it came from,
+// so people can fix it when the spot they picked is the summit or a lake, not the trailhead.
+function setTrailheadElev(ft, note) {
+  $("trailhead-elev").value = ft;
+  $("elev-note").textContent = note;
+}
+
+async function lookUpElevation(lat, lon) {
+  try {
+    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);
+    const m = (await res.json()).elevation?.[0];
+    if (Number.isFinite(m)) setTrailheadElev(Math.round(m * 3.28084), "From the map spot you picked. If that's a summit or a lake, change it to the trailhead's elevation (it's on AllTrails or your map).");
+  } catch {
+    $("elev-note").textContent = "Couldn't look it up. Add it if you know it.";
+  }
 }
 
 $("place-search").addEventListener("click", async () => {
@@ -207,7 +227,8 @@ $("gpx").addEventListener("change", async (e) => {
     setVal("back-gain", r.gainFt !== null ? Math.max(0, r.gainFt - r.topGainFt) : "");
     updateForm();
     const spot = await describeSpot(r.start.lat, r.start.lon);
-    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon });
+    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon,
+      elevFt: Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined });
     $("place").value = name || "";
     track("gpx-import");
 
@@ -254,7 +275,7 @@ $("gpx").addEventListener("change", async (e) => {
         setVal("past-gain", useTop ? r.topGainFt : r.gainFt);
         setVal("past-hours", Math.round((useTop ? r.topHours : r.elapsedHours) * 100) / 100);
         $("pace").value = "custom";
-        saveMyPace();
+        saveMyPace(Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined);
         rec.textContent = "✓ Saved as your pace. Now import or enter the hike you're planning.";
       });
       rec.appendChild(document.createElement("br"));
@@ -269,10 +290,10 @@ $("gpx").addEventListener("change", async (e) => {
 // ---------- Forecast ----------
 async function fetchForecast(place) {
   const params = new URLSearchParams({
-    latitude: place.lat, longitude: place.lon, timezone: "auto", forecast_days: "16",
+    latitude: place.lat, longitude: place.lon, timezone: "auto", forecast_days: "16", past_days: "3",
     temperature_unit: "fahrenheit", wind_speed_unit: "mph", precipitation_unit: "inch",
-    hourly: "temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,uv_index",
-    daily: "sunrise,sunset,temperature_2m_min,temperature_2m_max,weather_code",
+    hourly: "temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,uv_index,snowfall",
+    daily: "sunrise,sunset,temperature_2m_min,temperature_2m_max,weather_code,snowfall_sum",
   });
   const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!res.ok) throw new Error("Weather service error");
@@ -285,6 +306,7 @@ function readInputs() {
   return {
     upMiles: +$("up-miles").value,
     upGainFt: +$("up-gain").value || 0,
+    trailheadFt: $("trailhead-elev").value === "" ? null : +$("trailhead-elev").value,
     ending,
     endType: $("end-type").value,
     backMiles: ending === "outback" ? 0 : +$("back-miles").value || 0,
@@ -293,6 +315,7 @@ function readInputs() {
     date: $("date").value,
     time: $("time").value,
     nights: +$("nights").value,
+    cooking: $("cooking").checked,
     pace: $("pace").value,
     paceRef: $("pace").value === "custom" ? loadMyPace() : null,
   };
@@ -324,6 +347,7 @@ function updateForm() {
   $("end-type-wrap").hidden = i.ending !== "oneway";
   $("back-miles-wrap").hidden = i.ending === "outback";
   $("last-time-wrap").hidden = i.ending !== "oneway" || i.endType === "car";
+  $("cooking-wrap").hidden = i.nights === 0;
   $("back-miles-label").textContent = i.ending === "loop" ? "Miles from the top back to the start" : `Miles from the top to the ${endName(i)}`;
   if (!i.upMiles) return ($("totals").textContent = "");
   const total = i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles);
@@ -337,13 +361,14 @@ function loadMyPace() {
   try { return JSON.parse(localStorage.getItem(PACE_KEY)); } catch { return null; }
 }
 
-function saveMyPace() {
+function saveMyPace(elevFt) {
   const miles = +$("past-miles").value, gainFt = +$("past-gain").value || 0, hours = +$("past-hours").value;
   if (!miles || !hours) {
     $("past-result").textContent = "Add the miles to the top and how long it took.";
     return;
   }
-  try { localStorage.setItem(PACE_KEY, JSON.stringify({ miles, gainFt, hours })); } catch {}
+  // elevFt: where the climb started, when we know it (from a GPX), so altitude can be taken into account.
+  try { localStorage.setItem(PACE_KEY, JSON.stringify({ miles, gainFt, hours, elevFt: typeof elevFt === "number" ? elevFt : undefined })); } catch {}
   track("pace-saved");
   showPace();
 }
@@ -371,7 +396,7 @@ function showPace() {
 }
 
 $("pace").addEventListener("change", showPace);
-$("past-save").addEventListener("click", saveMyPace);
+$("past-save").addEventListener("click", () => saveMyPace());
 
 $("plan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -406,7 +431,9 @@ function buildPlan(rawInputs, forecast) {
   const inputs = normalizeInputs(rawInputs);
   const start = parseLocal(`${inputs.date}T${inputs.time}`);
   const days = inputs.nights + 1;
-  const est = estimateHike({ ...inputs, pace: makePace(inputs), heavyPack: inputs.nights > 0, days });
+  // Trailhead elevation: from the GPX when we have it, otherwise the weather service's estimate for that spot.
+  const trailheadFt = inputs.trailheadFt ?? (Number.isFinite(forecast.elevation) ? Math.round(forecast.elevation * 3.28084) : 0);
+  const est = estimateHike({ ...inputs, pace: makePace(inputs), heavyPack: inputs.nights > 0, days, trailheadFt });
 
   const daily = forecast.daily.time.map((t, i) => ({
     date: t,
@@ -415,6 +442,7 @@ function buildPlan(rawInputs, forecast) {
     min: forecast.daily.temperature_2m_min[i],
     max: forecast.daily.temperature_2m_max[i],
     code: forecast.daily.weather_code[i],
+    snowCm: forecast.daily.snowfall_sum?.[i] ?? 0,
   }));
   const dayIndex = daily.findIndex((d) => d.date === inputs.date);
   if (dayIndex === -1) return { error: "That date is outside the 16-day forecast. Plan again closer to your trip." };
@@ -436,6 +464,7 @@ function buildPlan(rawInputs, forecast) {
     wind: forecast.hourly.wind_speed_10m[i],
     gust: forecast.hourly.wind_gusts_10m[i],
     uv: forecast.hourly.uv_index[i] ?? 0,
+    snow: forecast.hourly.snowfall?.[i] ?? 0,
   })).filter((h) => h.time >= addHours(start, -1) && h.time <= end);
   if (!hours.length) return { error: "No hourly forecast for that time yet. Try a date within the next 16 days." };
 
@@ -448,6 +477,13 @@ function buildPlan(rawInputs, forecast) {
     maxUv: Math.max(...hours.map((h) => h.uv)),
     thunder: hours.some((h) => isThunder(h.code)),
     nights: inputs.nights,
+    cooking: inputs.cooking ?? true,
+    totalGainFt: est.totalGainFt,
+    topFt: trailheadFt + climbToTop,
+    minTempTopF: Math.min(...hours.map((h) => tempAtTop(h.temp, climbToTop))),
+    snowDuring: hours.some((h) => h.snow > 0 || (h.code >= 71 && h.code <= 86)),
+    // Snow at the trailhead in the 3 days before (and the day of) the hike.
+    snowRecentCm: daily.slice(Math.max(0, dayIndex - 3), dayIndex + 1).reduce((sum, d) => sum + d.snowCm, 0),
     // Camp is assumed to sit halfway up the climb.
     nightLowF: inputs.nights > 0
       ? Math.min(...daily.slice(dayIndex + 1, dayIndex + 1 + inputs.nights).map((d) => tempAtTop(d.min, climbToTop / 2)))
@@ -472,18 +508,12 @@ function buildPlan(rawInputs, forecast) {
     ride = { name: endName(inputs), last, level: !last ? null : finish.best > last ? "danger" : finish.worst > last ? "warn" : "ok" };
   }
 
-  const waterArgs = { gainFt: est.totalGainFt, maxFeelsF: w.maxFeelsF, nights: inputs.nights };
-  const foodArgs = { nights: inputs.nights, minFeelsF: w.minFeelsF };
-  const foodBest = estimateFood({ totalHours: est.finish.best * days, ...foodArgs });
-  const foodWorst = estimateFood({ totalHours: est.finish.worst * days, ...foodArgs });
+  const hoursLow = est.finish.best * days, hoursHigh = est.finish.worst * days;
   return {
-    inputs, start, est, top, finish, first, hours, w, light, days, ride,
+    inputs, start, est, top, finish, first, hours, w, light, days, ride, trailheadFt,
     daily: daily.slice(dayIndex, dayIndex + days),
-    water: {
-      low: estimateWater({ totalHours: est.finish.best * days, ...waterArgs }).low,
-      high: estimateWater({ totalHours: est.finish.worst * days, ...waterArgs }).high,
-    },
-    food: { ...foodWorst, caloriesLow: foodBest.caloriesLow },
+    water: estimateWater({ hoursLow, hoursHigh, gainFt: est.totalGainFt, maxFeelsF: w.maxFeelsF, nights: inputs.nights, cooking: w.cooking }),
+    food: estimateFood({ hoursLow, hoursHigh, nights: inputs.nights, minFeelsF: w.minFeelsF }),
     gear: gearChecklist(w),
     alerts: warnings({ day: light, w }),
   };
@@ -499,7 +529,6 @@ function render(savedName) {
   if (p.error) return (out.innerHTML = `<div class="alert warn">${p.error}</div>`);
 
   const perDay = p.days > 1 ? " per day" : "";
-  const topF = (f) => Math.round(f);
   out.innerHTML = `
     <div class="summary-head">
       <div>
@@ -519,11 +548,15 @@ function render(savedName) {
     <div class="cards">
       <div class="card"><div class="label">Time on trail${perDay}</div><div class="big">${formatDuration(p.est.finish.best)} – ${formatDuration(p.est.finish.worst)}</div>
         <div class="small">If you keep your pace – if you get tired. Breaks included.</div></div>
-      <div class="card"><div class="label">${inputs.nights ? "Water for the whole trip" : "Water to carry"}</div><div class="big">${p.water.low}–${p.water.high} L</div>
-        <div class="small">${inputs.nights ? "Includes camp and cooking water. Carry only what you need between water sources you can filter." : "Carry the high end if it's hot or you're unsure."}</div></div>
-      <div class="card"><div class="label">${p.food.kind === "snacks" ? "Snacks to pack" : "Food for the trip"}</div>
-        <div class="big">${p.food.caloriesLow.toLocaleString()}–${p.food.caloriesHigh.toLocaleString()} cal</div>
-        <div class="small">${p.food.kind === "snacks" ? "About 200–300 calories per hour" : `About ${p.food.poundsLow}–${p.food.poundsHigh} lb of food`}</div></div>
+      <div class="card"><div class="label">Water</div><div class="big">${p.water.total[0]}–${p.water.total[1]} L</div>
+        <div class="small">${inputs.nights
+          ? `Hiking: ${p.water.hike[0]}–${p.water.hike[1]} L · At camp: ${p.water.camp[0]}–${p.water.camp[1]} L for ${w_cook(p)}. Carry only what you need between water sources you can filter.`
+          : "To drink while hiking. Carry the high end if it's hot or you're unsure."}</div></div>
+      <div class="card"><div class="label">Food to pack</div>
+        <div class="big">${p.food.total[0].toLocaleString()}–${p.food.total[1].toLocaleString()} cal</div>
+        <div class="small">${inputs.nights
+          ? `Trail snacks: ${p.food.snacks[0].toLocaleString()}–${p.food.snacks[1].toLocaleString()} · Dinner and breakfast: ${p.food.meals[0].toLocaleString()}–${p.food.meals[1].toLocaleString()}. About ${p.food.pounds[0]}–${p.food.pounds[1]} lb.`
+          : "Snacks: about 200–300 calories for every hour on the trail."}</div></div>
     </div>
 
     <h3>Your day</h3>
@@ -538,19 +571,19 @@ function render(savedName) {
         ? `<li class="hint"><span>This hike is longer than the daylight. Plan to hike part of it in the dark, with a charged headlamp.</span><b></b></li>`
         : `<li class="hint"><span>Latest start to finish 30 min before sunset, even if you get tired</span><b>${fmtTime(p.light.latestStart)}</b></li>`}
     </ul>
-    <p class="range-note">Each range runs from "if you keep your pace" to "if you get tired." Long days have wider ranges because people slow down more as the day goes on.</p>
+    <p class="range-note">Each range runs from "if you keep your pace" to "if you get tired." Long days have wider ranges because people slow down more as the day goes on.${p.est.altitudeSlowdown ? ` This hike is high up (trailhead about ${p.trailheadFt.toLocaleString()} ft), so times include about ${p.est.altitudeSlowdown}% extra for thinner air.` : ""}</p>
     ${p.days === 1 ? `<p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b> (sunrise is ${fmtTime(p.first.sunrise)}).
       <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>` : ""}
 
     <h3>Weather ${p.days > 1 ? "by day" : "during your hike"}</h3>
-    <p class="small muted">Trailhead forecast. At the top it is usually about ${topF(3.5 * (p.days === 1 ? inputs.upGainFt : p.est.totalGainFt / p.days) / 1000)}°F colder.</p>
-    ${p.days > 1 ? dailyTable(p.daily) : hourlyTable(p.hours)}
+    ${p.days > 1 ? dailyCards(p.daily) : weatherChart(p)}
 
     <h3>Pack list for these conditions</h3>
-    <ul class="gear">${p.gear.map((g) => `<li><label><input type="checkbox"> <b>${g.item}</b></label><span class="small muted">${g.why}</span></li>`).join("")}</ul>
+    ${gearList(p.gear)}
 
     <p class="disclaimer">All estimates are a rough guide based on standard hiking rules of thumb and the forecast. Weather in the mountains changes fast. Check official sources (NWS, park and forest offices) and turn back if conditions change.</p>`;
 
+  if (p.days === 1) wireChart(p);
   $("save-btn").addEventListener("click", saveTrip);
   $("print-btn").addEventListener("click", () => { track("print"); window.print(); });
   $("sunrise-btn")?.addEventListener("click", () => {
@@ -577,16 +610,134 @@ function rideAlert(p) {
   return `<div class="alert warn">Check when the last ${name} leaves and enter it above, so Trail Prep can warn you if you might miss it.</div>`;
 }
 
+const w_cook = (p) => (p.w.cooking ? "drinking and cooking" : "drinking");
+
+// Weather icon for a WMO code; a moon instead of a sun at night.
+function weatherIcon(code, night) {
+  if (code === 0) return night ? "🌙" : "☀️";
+  if (code <= 2) return night ? "☁️" : "⛅";
+  if (code === 3) return "☁️";
+  if (code <= 48) return "🌫️";
+  if (code <= 67 || (code >= 80 && code <= 82)) return "🌧️";
+  if (code <= 77 || code <= 86) return "❄️";
+  return "⛈️";
+}
+
+// Temperature over the hike as a line chart (inline SVG): "feels like" at the trailhead and
+// at the top, night shaded, freezing marked, and when you reach the top and finish.
+// Hovering or tapping shows every number for that hour. A table view sits underneath.
+function weatherChart(p) {
+  const hrs = p.hours;
+  const climb = p.inputs.upGainFt;
+  const W = 700, H = 230, L = 40, R = 16, T = 14, B = 30;
+  const t0 = hrs[0].time.getTime(), t1 = hrs[hrs.length - 1].time.getTime();
+  const x = (d) => L + ((d.getTime() - t0) / Math.max(1, t1 - t0)) * (W - L - R);
+  const tops = hrs.map((h) => tempAtTop(h.feels, climb));
+  let lo = Math.floor((Math.min(...tops, ...hrs.map((h) => h.feels)) - 4) / 10) * 10;
+  let hi = Math.ceil((Math.max(...hrs.map((h) => h.feels), ...tops) + 4) / 10) * 10;
+  if (hi - lo < 20) hi = lo + 20;
+  const y = (f) => T + ((hi - f) / (hi - lo)) * (H - T - B);
+  const line = (vals) => vals.map((v, i) => `${i ? "L" : "M"}${x(hrs[i].time).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const ticks = [];
+  for (let f = lo; f <= hi; f += 10) ticks.push(f);
+  const step = hrs.length > 12 ? 3 : 2;
+  const night = (d) => d < p.first.sunrise || d > p.first.sunset;
+  const clampX = (d) => Math.max(L, Math.min(W - R, x(d)));
+  const mid = (r) => new Date((r.best.getTime() + r.worst.getTime()) / 2);
+  const marks = [
+    { at: mid(p.top), label: "Top" },
+    { at: mid(p.finish), label: p.inputs.ending === "oneway" ? "End" : "Finish" },
+  ].filter((m) => m.at.getTime() >= t0 && m.at.getTime() <= t1);
+  const lastI = hrs.length - 1;
+
+  return `
+    <div class="chart" id="wx-chart">
+      <div class="legend"><span><i class="key s1"></i>Feels like at the trailhead</span><span><i class="key s2"></i>Feels like at the top (estimated)</span></div>
+      <div class="chart-box">
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Feels-like temperature during the hike, at the trailhead and at the top">
+          ${t0 < p.first.sunrise.getTime() ? `<rect class="night" x="${L}" y="${T}" width="${Math.max(0, clampX(p.first.sunrise) - L)}" height="${H - T - B}"/>` : ""}
+          ${p.first.sunset.getTime() < t1 ? `<rect class="night" x="${clampX(p.first.sunset)}" y="${T}" width="${W - R - clampX(p.first.sunset)}" height="${H - T - B}"/>` : ""}
+          ${ticks.map((f) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(f)}" y2="${y(f)}"/><text class="axis" x="${L - 6}" y="${y(f) + 4}" text-anchor="end">${f}°</text>`).join("")}
+          ${32 > lo && 32 < hi ? `<line class="freeze" x1="${L}" x2="${W - R}" y1="${y(32)}" y2="${y(32)}"/><text class="axis" x="${W - R}" y="${y(32) - 4}" text-anchor="end">Freezing 32°</text>` : ""}
+          ${marks.map((m) => `<line class="mark" x1="${x(m.at)}" x2="${x(m.at)}" y1="${T}" y2="${H - B}"/><text class="mark-label" x="${x(m.at) + 4}" y="${T + 11}">${m.label} ~${fmtTime(m.at)}</text>`).join("")}
+          ${hrs.map((h, i) => (i % step ? "" : `<text class="axis" x="${x(h.time)}" y="${H - 10}" text-anchor="middle">${fmtTime(h.time).replace(":00", "")}</text>`)).join("")}
+          <path class="ln s1" d="${line(hrs.map((h) => h.feels))}"/>
+          <path class="ln s2" d="${line(tops)}"/>
+          <circle class="dot s1" cx="${x(hrs[lastI].time)}" cy="${y(hrs[lastI].feels)}" r="4"/>
+          <circle class="dot s2" cx="${x(hrs[lastI].time)}" cy="${y(tops[lastI])}" r="4"/>
+          <line class="cross" id="wx-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
+          <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
+        </svg>
+        <div class="tip" id="wx-tip" hidden></div>
+      </div>
+      <p class="small muted">Shaded = dark. The top line is estimated from your climb (about 3.5°F colder per 1,000 ft).</p>
+      <div class="hour-strip">${hrs.map((h) => `
+        <div class="hour"><div class="h-time">${fmtTime(h.time).replace(":00", "")}</div><div class="h-icon">${weatherIcon(h.code, night(h.time))}</div>
+          <div class="h-temp">${Math.round(h.feels)}°</div><div class="h-sub">💧${h.rain}%</div><div class="h-sub">💨${Math.round(h.gust)}</div></div>`).join("")}
+      </div>
+      <details class="no-print"><summary>Show as a table</summary>${hourlyTable(hrs)}</details>
+    </div>`;
+}
+
+// Crosshair + tooltip for the weather chart (mouse, touch and pen).
+function wireChart(p) {
+  const box = document.querySelector("#wx-chart .chart-box");
+  if (!box) return;
+  const svg = box.querySelector("svg"), cross = $("wx-cross"), tip = $("wx-tip");
+  const hrs = p.hours, climb = p.inputs.upGainFt;
+  const t0 = hrs[0].time.getTime(), t1 = hrs[hrs.length - 1].time.getTime();
+  const show = (e) => {
+    const r = svg.getBoundingClientRect();
+    const sx = ((e.clientX - r.left) / r.width) * 700;
+    const t = t0 + ((sx - 40) / (700 - 56)) * (t1 - t0);
+    let i = hrs.findIndex((h) => h.time.getTime() >= t);
+    if (i < 0) i = hrs.length - 1;
+    if (i > 0 && t - hrs[i - 1].time.getTime() < hrs[i].time.getTime() - t) i -= 1;
+    const h = hrs[i];
+    const cx = 40 + ((h.time.getTime() - t0) / Math.max(1, t1 - t0)) * (700 - 56);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    tip.replaceChildren();
+    const row = (val, label, cls) => {
+      const d = document.createElement("div");
+      if (cls) { const k = document.createElement("i"); k.className = `key ${cls}`; d.appendChild(k); }
+      const b = document.createElement("b"); b.textContent = val; d.appendChild(b);
+      d.appendChild(document.createTextNode(` ${label}`));
+      tip.appendChild(d);
+    };
+    const head = document.createElement("div"); head.className = "tip-head";
+    head.textContent = `${fmtTime(h.time)} · ${describeWeather(h.code)}`; tip.appendChild(head);
+    row(`${Math.round(h.feels)}°F`, "trailhead", "s1");
+    row(`${Math.round(tempAtTop(h.feels, climb))}°F`, "top", "s2");
+    row(`${h.rain}%`, "chance of rain");
+    row(`${Math.round(h.wind)} / ${Math.round(h.gust)} mph`, "wind / gusts");
+    const left = (cx / 700) * r.width;
+    tip.style.left = `${Math.min(Math.max(left + 10, 0), r.width - 170)}px`;
+  };
+  const hide = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", hide);
+  window.addEventListener("resize", hide);
+}
+
 function hourlyTable(hours) {
   return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Sky</th><th>Temp</th><th>Feels</th><th>Rain</th><th>Wind / gust</th><th>UV</th></tr></thead><tbody>
     ${hours.map((h) => `<tr class="${isThunder(h.code) ? "danger-row" : ""}"><td>${fmtTime(h.time)}</td><td>${describeWeather(h.code)}</td><td>${Math.round(h.temp)}°</td><td>${Math.round(h.feels)}°</td><td>${h.rain}%</td><td>${Math.round(h.wind)} / ${Math.round(h.gust)} mph</td><td>${Math.round(h.uv)}</td></tr>`).join("")}
   </tbody></table></div>`;
 }
 
-function dailyTable(days) {
-  return `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Sky</th><th>High</th><th>Low</th><th>Sunrise</th><th>Sunset</th></tr></thead><tbody>
-    ${days.map((d) => `<tr><td>${fmtDay(parseLocal(d.date + "T12:00"))}</td><td>${describeWeather(d.code)}</td><td>${Math.round(d.max)}°</td><td>${Math.round(d.min)}°</td><td>${fmtTime(d.sunrise)}</td><td>${fmtTime(d.sunset)}</td></tr>`).join("")}
-  </tbody></table></div>`;
+function dailyCards(days) {
+  return `<div class="day-cards">${days.map((d) => `
+    <div class="day-card"><div class="h-time">${fmtDay(parseLocal(d.date + "T12:00"))}</div><div class="d-icon">${weatherIcon(d.code, false)}</div>
+      <div><b>${Math.round(d.max)}°</b> / ${Math.round(d.min)}°</div><div class="small muted">${describeWeather(d.code)}${d.snowCm ? ` · ${Math.round(d.snowCm)} cm snow` : ""}</div>
+      <div class="small muted">☀ ${fmtTime(d.sunrise)} – ${fmtTime(d.sunset)}</div></div>`).join("")}</div>`;
+}
+
+function gearList(items) {
+  const groups = [...new Set(items.map((g) => g.group))];
+  return groups.map((grp) => `<h4 class="gear-group">${grp}</h4><ul class="gear">${items.filter((g) => g.group === grp)
+    .map((g) => `<li><label><input type="checkbox"> <b>${g.item}</b></label><span class="small muted">${g.why}</span></li>`).join("")}</ul>`).join("");
 }
 
 // ---------- Saved trips (work offline) ----------
