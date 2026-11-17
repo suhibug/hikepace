@@ -29,7 +29,8 @@
       <div class="import">
         <label for="gpx" class="import-btn">📂 Import a route (GPX file)</label>
         <input type="file" id="gpx" hidden>
-        <span class="small muted">From AllTrails, Strava, Garmin, Coros and more. Fills in the trailhead, distance and elevation for you.</span>
+        <span class="small muted">Fills in the trailhead, the way up and the way back for you. <a href="#gpx-help" id="gpx-help-link">Where do I get a GPX file?</a></span>
+        <div id="gpx-help" class="small gpx-help" hidden></div>
         <div id="gpx-status" class="small"></div>
       </div>
       <p class="or"><span>or type it in</span></p>
@@ -43,17 +44,36 @@
       <ul id="place-results" class="place-results"></ul>
       <p id="place-chosen" class="chosen"></p>
 
+      <h3 class="step">The way up</h3>
       <div class="grid">
-        <div><label for="miles">Total distance you'll walk (miles)</label><input id="miles" type="number" min="0.1" step="0.1" required></div>
-        <div><label for="gain">Elevation gain (feet)</label><input id="gain" type="number" min="0" step="10" value="0"></div>
-        <div><label for="ending">How does your hike end?</label>
+        <div><label for="up-miles">Miles to the top</label><input id="up-miles" type="number" min="0.1" step="0.1" placeholder="e.g. 16" required>
+          <p class="small muted hint-under">Or to the turnaround point if there's no peak.</p></div>
+        <div><label for="up-gain">Climb to the top (feet)</label><input id="up-gain" type="number" min="0" step="10" placeholder="e.g. 10400"></div>
+      </div>
+
+      <h3 class="step">The way back</h3>
+      <div class="grid">
+        <div><label for="ending">How do you get back?</label>
           <select id="ending">
-            <option value="outback">Back the same way (out-and-back)</option>
-            <option value="loop">Back to the start a different way (loop)</option>
-            <option value="oneway">Somewhere else (tram, shuttle, or a car waiting)</option>
+            <option value="outback">Same trail back down</option>
+            <option value="loop">Different trail back (loop)</option>
+            <option value="oneway">To a tram, shuttle or car</option>
           </select></div>
-        <div><label for="top-miles">Miles to the top <span class="muted">(optional)</span></label><input id="top-miles" type="number" min="0" step="0.1" placeholder="e.g. 16"></div>
-        <div><label for="top-gain">Climb to the top, feet <span class="muted">(optional)</span></label><input id="top-gain" type="number" min="0" step="10" placeholder="e.g. 10400"></div>
+        <div id="end-type-wrap" hidden><label for="end-type">What's at the end?</label>
+          <select id="end-type">
+            <option value="tram">Tram or gondola</option>
+            <option value="shuttle">Shuttle or bus</option>
+            <option value="car">A car picking me up</option>
+          </select></div>
+        <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="0.1" placeholder="e.g. 5.5"></div>
+        <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (feet, optional)</label><input id="back-gain" type="number" min="0" step="10" placeholder="0"></div>
+        <div id="last-time-wrap" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time">
+          <p class="small muted hint-under">Check their website. Trail Prep warns you if you might miss it.</p></div>
+      </div>
+      <p id="totals" class="totals"></p>
+
+      <h3 class="step">When and how fast</h3>
+      <div class="grid">
         <div><label for="date">Date</label><input id="date" type="date" required></div>
         <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
         <div><label for="nights">Trip type</label>
@@ -68,23 +88,22 @@
             <option value="relaxed">Relaxed</option>
             <option value="average" selected>Average</option>
             <option value="fast">Fast</option>
-            <option value="custom">My own pace (from a past hike)</option>
+            <option value="custom">My own pace (from a past climb)</option>
           </select>
-          <p id="pace-desc" class="small muted pace-desc"></p></div>
-        <div><label for="group">People in the group</label><input id="group" type="number" min="1" max="20" value="1"></div>
+          <p id="pace-desc" class="small muted pace-desc"></p>
+          <p class="small muted hint-under">Hiking with others? Pick the slowest person's pace.</p></div>
       </div>
       <div id="my-pace" class="my-pace" hidden>
         <b>Teach Trail Prep your pace</b>
-        <p class="small muted">Enter a hike you already did, or import a GPX you recorded on Strava, Garmin, Coros or your watch (it reads the times for you). Count the whole time from start to finish, breaks included.</p>
+        <p class="small muted">Use the way up of a hike you already did. Long breaks at the top don't count. If you recorded a hike on a watch or app, import its GPX above and it reads the times for you.</p>
         <div class="grid">
-          <div><label for="past-miles">Past hike distance (miles)</label><input id="past-miles" type="number" min="0.1" step="0.1"></div>
-          <div><label for="past-gain">Past hike elevation gain (feet)</label><input id="past-gain" type="number" min="0" step="10"></div>
-          <div><label for="past-hours">How long it took (hours)</label><input id="past-hours" type="number" min="0.5" step="0.25" placeholder="e.g. 13"></div>
+          <div><label for="past-miles">Miles to the top</label><input id="past-miles" type="number" min="0.1" step="0.1" placeholder="e.g. 3"></div>
+          <div><label for="past-gain">Climb to the top (feet)</label><input id="past-gain" type="number" min="0" step="10" placeholder="e.g. 2600"></div>
+          <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="0.25" placeholder="e.g. 1.5"></div>
         </div>
         <button type="button" id="past-save" class="secondary">Save my pace</button>
         <p id="past-result" class="small"></p>
       </div>
-      <p class="small muted">Tip: copy distance and elevation gain from AllTrails or your trail map. Add "to the top" numbers when the top isn't halfway, like a long climb that ends at a tram.</p>
       <button id="plan-btn" type="submit" class="primary">Plan my hike</button>
       <p class="privacy">🔒 Your trips are saved only on this device. They are never uploaded, and nobody else can see them. We only count visits anonymously (no cookies, no names, no exact places).</p>
     </form>

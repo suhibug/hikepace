@@ -30,10 +30,13 @@ The most annoying parts of planning were unpredictable weather, not knowing the 
 
 ## How to use it
 
-1. Import a GPX route, or search for the trail, a landmark, or the nearest town (or paste coordinates, or tap 📍).
-2. Enter the total distance you'll walk and the elevation gain (copy them from AllTrails or your map), how the hike ends (out-and-back, loop, or somewhere else like a tram or a waiting car), and optionally the miles and climb to the top. Then the date, start time, trip type, pace, and group size.
-3. Tap **Plan my hike**.
-4. Tap **Save for offline** before you lose signal.
+1. Import a GPX route (it fills in everything below), or search for the trail, a landmark, or the nearest town.
+2. **The way up:** miles and feet of climbing to the top (or the turnaround point).
+3. **The way back:** same trail, a different trail back to the start, or down to a tram, shuttle, or car. For a tram or shuttle you can add the last departure time, and Trail Prep warns you if you might miss it.
+4. Date, start time, trip type, and pace (hiking with others? pick the slowest person's pace).
+5. Tap **Plan my hike**, then **Save for offline** before you lose signal.
+
+No GPX file? Free options: draw the trail on CalTopo and export it, or export a hike you recorded from your watch's app.
 
 On a phone, open the site and choose **Add to Home Screen** to use it like an app.
 
@@ -41,12 +44,11 @@ On a phone, open the site and choose **Add to Home Screen** to use it like an ap
 
 All numbers are rough guides, and the app says so.
 
-- **Time:** Naismith's rule, adjusted for heavy packs and group size, plus about 10 minutes of rest per hour. Each pace in plain numbers:
+- **Time, as a range:** Naismith's rule (3 mph, plus 1 hour per 2,000 ft of climbing), about 10 minutes of rest per hour, and about 10 more minutes per 1,000 ft of descent. Every time is shown as a range from "if you keep your pace" to "if you get tired"; the range widens on longer days because people slow down as the day goes on. Safety warnings use the tired end.
   - **Relaxed:** about 2.3 mph on flat ground, plus 1 hour for every 1,540 ft of climbing
   - **Average:** about 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing
   - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
-  - **My own pace:** learned from a hike you already did (type it in, or import a GPX you recorded and it reads the times). Saved only on your device.
-- **When you reach the top:** out-and-back hikes put the top halfway with all the climbing first; hikes that end somewhere else (like Cactus to Clouds ending at the tram) put the top at the end unless you enter miles and climb to the top; loops assume the top is about 60% of the way. Imported GPX routes fill this in automatically.
+  - **Your own pace:** learned from the way up of a climb you already did. For hikes much longer than that climb, Trail Prep scales the time the way endurance runners do (Riegel's formula) and adds a "getting tired" case.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
 - **Water:** 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature, more for big climbs, plus 2 to 3 liters per night at camp.
 - **Food:** 200 to 300 calories per hour of hiking on day hikes; 2,500 to 4,000 calories (1.5 to 2 lb) per day when backpacking; 10% more in the cold.

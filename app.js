@@ -1,8 +1,7 @@
 // Trail Prep: page logic. Weather comes from Open-Meteo (free, no account or key).
 import {
-  PACES, estimateHikeTime, tempAtTop, estimateWater, estimateFood, daylightPlan,
+  PACES, ENDINGS, END_TYPES, estimateHike, paceFactor, describePace, tempAtTop, estimateWater, estimateFood,
   gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
-  describePace, paceFactorFromHike,
 } from "./calc.js";
 
 const $ = (id) => document.getElementById(id);
@@ -198,12 +197,15 @@ $("gpx").addEventListener("change", async (e) => {
     const { points, name } = readGpx(await file.text());
     if (points.length < 2) throw new Error("No route points");
     const r = routeStats(points);
+    const setVal = (id, v) => { $(id).value = v ?? ""; };
 
-    $("miles").value = r.miles;
-    if (r.gainFt !== null) $("gain").value = r.gainFt;
+    // The way up = start to the highest point. The way back = the rest of the route.
+    setVal("up-miles", r.gainFt !== null ? r.topMiles : r.miles);
+    setVal("up-gain", r.topGainFt);
     $("ending").value = r.isLoop ? "loop" : "oneway";
-    $("top-miles").value = r.topMiles ?? "";
-    $("top-gain").value = r.topGainFt ?? "";
+    setVal("back-miles", r.gainFt !== null ? Math.round((r.miles - r.topMiles) * 10) / 10 : 0);
+    setVal("back-gain", r.gainFt !== null ? Math.max(0, r.gainFt - r.topGainFt) : "");
+    updateForm();
     const spot = await describeSpot(r.start.lat, r.start.lon);
     choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon });
     $("place").value = name || "";
@@ -212,21 +214,26 @@ $("gpx").addEventListener("change", async (e) => {
     status.innerHTML = "";
     const line = document.createElement("div");
     line.textContent = `✓ Imported ${name ? `"${name}"` : "your route"}: ${r.miles} mi` +
-      (r.gainFt !== null ? `, ${r.gainFt.toLocaleString()} ft gain, high point ${r.highFt.toLocaleString()} ft.` : ". This file has no elevation, so please add the elevation gain yourself.");
+      (r.gainFt !== null
+        ? `, ${r.gainFt.toLocaleString()} ft of climbing. The top (${r.highFt.toLocaleString()} ft) is at mile ${r.topMiles}.`
+        : ". This file has no elevation, so please add the climb yourself.");
     status.appendChild(line);
     if (!r.isLoop) {
       const note = document.createElement("div");
       note.className = "muted";
-      note.textContent = `This route is one-way (it ends ${r.gapMiles} mi from where it starts), so I set it to end somewhere else, like a tram or a car waiting. If you'll hike back the same way instead, tap below.`;
+      note.textContent = `This route ends ${r.gapMiles} mi from where it starts, so I set the way back to a tram, shuttle or car. Pick which one below. If you'll walk back the same trail instead, tap here:`;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
-      btn.textContent = "Hiking back the same way? Make it out-and-back";
+      btn.textContent = "I'll hike back the same way";
       btn.addEventListener("click", () => {
-        $("miles").value = Math.round(r.miles * 2 * 10) / 10;
-        if (r.gainFt !== null) $("gain").value = r.outAndBackGainFt;
+        // The whole route becomes the way out; every descent on the way out is a climb on the way back.
+        setVal("up-miles", r.miles);
+        setVal("up-gain", r.gainFt);
+        setVal("back-gain", r.gainFt !== null ? r.outAndBackGainFt - r.gainFt : "");
         $("ending").value = "outback";
-        note.textContent = `✓ Doubled for an out-and-back: ${$("miles").value} mi${r.gainFt !== null ? `, ${(+$("gain").value).toLocaleString()} ft gain` : ""}.`;
+        updateForm();
+        note.textContent = "✓ Set to hike back the same way.";
       });
       note.appendChild(document.createElement("br"));
       note.appendChild(btn);
@@ -234,17 +241,18 @@ $("gpx").addEventListener("change", async (e) => {
     }
     // A recorded hike (not just a planned route) has times, so it can teach us the hiker's pace.
     if (r.elapsedHours > 0.25 && r.gainFt !== null) {
+      const useTop = r.topHours > 0.25 && r.topMiles > 0;
       const rec = document.createElement("div");
       rec.className = "muted";
-      rec.textContent = `This looks like a hike you recorded: ${formatDuration(r.elapsedHours)} from start to finish.`;
+      rec.textContent = `This looks like a hike you recorded: ${useTop ? `${formatDuration(r.topHours)} to the top, ` : ""}${formatDuration(r.elapsedHours)} in total.`;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
       btn.textContent = "Use this hike to learn my pace";
       btn.addEventListener("click", () => {
-        $("past-miles").value = r.miles;
-        $("past-gain").value = r.gainFt;
-        $("past-hours").value = Math.round(r.elapsedHours * 100) / 100;
+        setVal("past-miles", useTop ? r.topMiles : r.miles);
+        setVal("past-gain", useTop ? r.topGainFt : r.gainFt);
+        setVal("past-hours", Math.round((useTop ? r.topHours : r.elapsedHours) * 100) / 100);
         $("pace").value = "custom";
         saveMyPace();
         rec.textContent = "✓ Saved as your pace. Now import or enter the hike you're planning.";
@@ -273,23 +281,57 @@ async function fetchForecast(place) {
 
 // ---------- Form ----------
 function readInputs() {
+  const ending = $("ending").value;
   return {
-    miles: +$("miles").value,
-    gainFt: +$("gain").value || 0,
+    upMiles: +$("up-miles").value,
+    upGainFt: +$("up-gain").value || 0,
+    ending,
+    endType: $("end-type").value,
+    backMiles: ending === "outback" ? 0 : +$("back-miles").value || 0,
+    backGainFt: +$("back-gain").value || 0,
+    lastDeparture: ending === "oneway" && $("end-type").value !== "car" ? $("last-time").value : "",
     date: $("date").value,
     time: $("time").value,
     nights: +$("nights").value,
-    ending: $("ending").value,
-    topMiles: +$("top-miles").value || null,
-    topGainFt: $("top-gain").value === "" ? null : +$("top-gain").value,
     pace: $("pace").value,
-    customFactor: loadMyPace()?.factor ?? 1,
-    groupSize: +$("group").value || 1,
+    paceRef: $("pace").value === "custom" ? loadMyPace() : null,
   };
 }
 
+// Trips saved by older versions used a total distance; turn them into "way up / way back".
+function normalizeInputs(i) {
+  if (i.upMiles) return i;
+  const ending = i.ending || "outback";
+  const upMiles = i.topMiles || (ending === "outback" ? i.miles / 2 : ending === "oneway" ? i.miles : i.miles * 0.6);
+  const upGainFt = i.topGainFt ?? i.gainFt ?? 0;
+  return {
+    ...i, ending, endType: "car", lastDeparture: "", upMiles, upGainFt,
+    backMiles: ending === "outback" ? 0 : Math.max(0, i.miles - upMiles),
+    backGainFt: Math.max(0, (i.gainFt || 0) - upGainFt),
+  };
+}
+
+function makePace(i) {
+  if (i.pace === "custom") return i.paceRef ? { ref: i.paceRef } : { factor: i.customFactor || 1 };
+  return { factor: PACES[i.pace]?.factor ?? 1 };
+}
+
+const endName = (i) => END_TYPES[i.endType] || "end";
+
+// Show only the questions that matter for the chosen way back, and keep a running total.
+function updateForm() {
+  const i = readInputs();
+  $("end-type-wrap").hidden = i.ending !== "oneway";
+  $("back-miles-wrap").hidden = i.ending === "outback";
+  $("last-time-wrap").hidden = i.ending !== "oneway" || i.endType === "car";
+  $("back-miles-label").textContent = i.ending === "loop" ? "Miles from the top back to the start" : `Miles from the top to the ${endName(i)}`;
+  if (!i.upMiles) return ($("totals").textContent = "");
+  const total = i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles);
+  $("totals").textContent = `Total: ${Math.round(total * 10) / 10} mi and ${(i.upGainFt + i.backGainFt).toLocaleString()} ft of climbing`;
+}
+
 // ---------- Your own pace ----------
-// Learned from a hike the person already did, and kept only on this device.
+// Learned from the way up of a hike the person already did, and kept only on this device.
 const PACE_KEY = "trailprep.myPace";
 function loadMyPace() {
   try { return JSON.parse(localStorage.getItem(PACE_KEY)); } catch { return null; }
@@ -298,11 +340,10 @@ function loadMyPace() {
 function saveMyPace() {
   const miles = +$("past-miles").value, gainFt = +$("past-gain").value || 0, hours = +$("past-hours").value;
   if (!miles || !hours) {
-    $("past-result").textContent = "Add the distance and how long it took.";
+    $("past-result").textContent = "Add the miles to the top and how long it took.";
     return;
   }
-  const mine = { factor: paceFactorFromHike({ miles, gainFt, hours }), miles, gainFt, hours };
-  try { localStorage.setItem(PACE_KEY, JSON.stringify(mine)); } catch {}
+  try { localStorage.setItem(PACE_KEY, JSON.stringify({ miles, gainFt, hours })); } catch {}
   track("pace-saved");
   showPace();
 }
@@ -315,14 +356,15 @@ function showPace() {
     return;
   }
   if (!mine) {
-    $("pace-desc").textContent = "Enter a hike you already did below, and Trail Prep will use your real pace.";
+    $("pace-desc").textContent = "Enter a climb you already did below, and Trail Prep will use your real pace.";
     $("past-result").textContent = "";
     return;
   }
-  const pct = Math.round((mine.factor - 1) * 100);
+  const factor = paceFactor({ ref: mine });
+  const pct = Math.round((factor - 1) * 100);
   const vsAverage = Math.abs(pct) < 5 ? "about average" : pct > 0 ? `${pct}% slower than average` : `${-pct}% faster than average`;
-  $("pace-desc").textContent = `Your pace: ${describePace(mine.factor)} (${vsAverage}).`;
-  $("past-result").textContent = `✓ Learned from your ${mine.miles} mi, ${mine.gainFt.toLocaleString()} ft hike that took ${formatDuration(mine.hours)}.`;
+  $("pace-desc").textContent = `Your pace: ${describePace(factor)} (${vsAverage}). On hikes much longer than this one, Trail Prep adds time for getting tired.`;
+  $("past-result").textContent = `✓ Learned from your climb of ${mine.miles} mi and ${mine.gainFt.toLocaleString()} ft in ${formatDuration(mine.hours)}.`;
   $("past-miles").value ||= mine.miles;
   $("past-gain").value ||= mine.gainFt;
   $("past-hours").value ||= mine.hours;
@@ -335,8 +377,9 @@ $("plan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!state.place) return showError("Pick a trailhead location first (search, coordinates, or use my location).");
   const inputs = readInputs();
-  if (!inputs.miles || !inputs.date || !inputs.time) return showError("Add the distance, date and start time.");
-  if (inputs.pace === "custom" && !loadMyPace()) return showError("Save your pace first (enter a past hike under \"Teach Trail Prep your pace\"), or pick another pace.");
+  if (!inputs.upMiles || !inputs.date || !inputs.time) return showError("Add the miles to the top, the date and the start time.");
+  if (inputs.ending !== "outback" && !inputs.backMiles) return showError(inputs.ending === "loop" ? "Add the miles from the top back to the start." : `Add the miles from the top to the ${endName(inputs)}.`);
+  if (inputs.pace === "custom" && !inputs.paceRef) return showError("Save your pace first (enter a past climb under \"Teach Trail Prep your pace\"), or pick another pace.");
   $("plan-btn").disabled = true;
   $("plan-btn").textContent = "Getting the forecast…";
   try {
@@ -359,15 +402,11 @@ function showError(msg) {
 }
 
 // ---------- Build the plan ----------
-function buildPlan(inputs, forecast) {
+function buildPlan(rawInputs, forecast) {
+  const inputs = normalizeInputs(rawInputs);
   const start = parseLocal(`${inputs.date}T${inputs.time}`);
   const days = inputs.nights + 1;
-  const time = estimateHikeTime({
-    miles: inputs.miles / days, gainFt: inputs.gainFt / days,
-    pace: inputs.pace, customFactor: inputs.customFactor, groupSize: inputs.groupSize, heavyPack: inputs.nights > 0,
-    ending: inputs.ending ?? "outback",
-    topMiles: days === 1 ? inputs.topMiles : null, topGainFt: days === 1 ? inputs.topGainFt : null,
-  });
+  const est = estimateHike({ ...inputs, pace: makePace(inputs), heavyPack: inputs.nights > 0, days });
 
   const daily = forecast.daily.time.map((t, i) => ({
     date: t,
@@ -381,8 +420,13 @@ function buildPlan(inputs, forecast) {
   if (dayIndex === -1) return { error: "That date is outside the 16-day forecast. Plan again closer to your trip." };
   const first = daily[dayIndex];
 
-  // Hours of weather that matter: from the start until the end of the last hiking day.
-  const end = addHours(start, inputs.nights * 24 + time.totalHours);
+  // Every time is a range: "if you keep your pace" to "if you get tired".
+  const at = (h) => addHours(start, h);
+  const top = { best: at(est.top.best), worst: at(est.top.worst) };
+  const finish = { best: at(est.finish.best), worst: at(est.finish.worst) };
+
+  // Hours of weather that matter: from the start until the latest you could finish.
+  const end = addHours(start, inputs.nights * 24 + est.finish.worst);
   const hours = forecast.hourly.time.map((t, i) => ({
     time: parseLocal(t),
     temp: forecast.hourly.temperature_2m[i],
@@ -395,10 +439,10 @@ function buildPlan(inputs, forecast) {
   })).filter((h) => h.time >= addHours(start, -1) && h.time <= end);
   if (!hours.length) return { error: "No hourly forecast for that time yet. Try a date within the next 16 days." };
 
-  const dayGain = inputs.gainFt / days;
+  const climbToTop = days === 1 ? inputs.upGainFt : est.totalGainFt / days;
   const w = {
     maxFeelsF: Math.max(...hours.map((h) => h.feels)),
-    minFeelsF: Math.min(...hours.map((h) => tempAtTop(h.feels, dayGain))),
+    minFeelsF: Math.min(...hours.map((h) => tempAtTop(h.feels, climbToTop))),
     maxRainChance: Math.max(...hours.map((h) => h.rain)),
     maxGustMph: Math.max(...hours.map((h) => h.gust)),
     maxUv: Math.max(...hours.map((h) => h.uv)),
@@ -406,19 +450,40 @@ function buildPlan(inputs, forecast) {
     nights: inputs.nights,
     // Camp is assumed to sit halfway up the climb.
     nightLowF: inputs.nights > 0
-      ? Math.min(...daily.slice(dayIndex + 1, dayIndex + 1 + inputs.nights).map((d) => tempAtTop(d.min, dayGain / 2)))
+      ? Math.min(...daily.slice(dayIndex + 1, dayIndex + 1 + inputs.nights).map((d) => tempAtTop(d.min, climbToTop / 2)))
       : null,
   };
 
-  const light = daylightPlan({ start, totalHours: time.totalHours, toHighPointHours: time.toHighPointHours, sunrise: first.sunrise, sunset: first.sunset });
-  w.headlamp = light.startsInDark || light.finish > addHours(first.sunset, -1) || inputs.nights > 0;
-  w.headlampWhy = inputs.nights > 0 ? "You'll be at camp after dark." : light.startsInDark ? "You start before sunrise." : "You finish close to or after sunset.";
+  const light = {
+    startsInDark: start < first.sunrise,
+    darkLikely: finish.best > first.sunset,
+    darkPossible: finish.worst > first.sunset,
+    tight: finish.worst > addHours(first.sunset, -0.5),
+    latestStart: addHours(first.sunset, -0.5 - est.finish.worst),
+    sunriseAtTopStart: addHours(first.sunrise, -est.top.worst),
+  };
+  w.headlamp = light.startsInDark || finish.worst > addHours(first.sunset, -1) || inputs.nights > 0;
+  w.headlampWhy = inputs.nights > 0 ? "You'll be at camp after dark." : light.startsInDark ? "You start before sunrise." : "If you get tired, you could finish close to or after sunset.";
 
+  // Tram or shuttle at the end: will they make the last one?
+  let ride = null;
+  if (inputs.ending === "oneway" && days === 1) {
+    const last = inputs.lastDeparture ? parseLocal(`${inputs.date}T${inputs.lastDeparture}`) : null;
+    ride = { name: endName(inputs), last, level: !last ? null : finish.best > last ? "danger" : finish.worst > last ? "warn" : "ok" };
+  }
+
+  const waterArgs = { gainFt: est.totalGainFt, maxFeelsF: w.maxFeelsF, nights: inputs.nights };
+  const foodArgs = { nights: inputs.nights, minFeelsF: w.minFeelsF };
+  const foodBest = estimateFood({ totalHours: est.finish.best * days, ...foodArgs });
+  const foodWorst = estimateFood({ totalHours: est.finish.worst * days, ...foodArgs });
   return {
-    start, time, first, hours, w, light, days,
+    inputs, start, est, top, finish, first, hours, w, light, days, ride,
     daily: daily.slice(dayIndex, dayIndex + days),
-    water: estimateWater({ totalHours: time.totalHours * days, gainFt: inputs.gainFt, maxFeelsF: w.maxFeelsF, nights: inputs.nights }),
-    food: estimateFood({ totalHours: time.totalHours * days, nights: inputs.nights, minFeelsF: w.minFeelsF }),
+    water: {
+      low: estimateWater({ totalHours: est.finish.best * days, ...waterArgs }).low,
+      high: estimateWater({ totalHours: est.finish.worst * days, ...waterArgs }).high,
+    },
+    food: { ...foodWorst, caloriesLow: foodBest.caloriesLow },
     gear: gearChecklist(w),
     alerts: warnings({ day: light, w }),
   };
@@ -426,8 +491,9 @@ function buildPlan(inputs, forecast) {
 
 // ---------- Show the plan ----------
 function render(savedName) {
-  const { inputs, forecast, place } = { ...state };
-  const p = buildPlan(inputs, forecast);
+  const { forecast, place } = state;
+  const p = buildPlan(state.inputs, forecast);
+  const inputs = p.inputs ?? state.inputs;
   const out = $("results");
   out.hidden = false;
   if (p.error) return (out.innerHTML = `<div class="alert warn">${p.error}</div>`);
@@ -438,7 +504,7 @@ function render(savedName) {
     <div class="summary-head">
       <div>
         <h2>${place.name}</h2>
-        <p class="muted">${fmtDay(p.start)} · ${inputs.miles} mi · ${inputs.gainFt.toLocaleString()} ft gain · ${PACES[inputs.pace].label} pace${inputs.groupSize > 1 ? ` · group of ${inputs.groupSize}` : ""}${inputs.nights ? ` · ${inputs.nights} night${inputs.nights > 1 ? "s" : ""}` : ""}</p>
+        <p class="muted">${fmtDay(p.start)} · ${p.est.totalMiles} mi · ${p.est.totalGainFt.toLocaleString()} ft of climbing · ${inputs.ending === "oneway" ? `ends at a ${endName(inputs)}` : ENDINGS[inputs.ending]} · ${PACES[inputs.pace].label} pace${inputs.nights ? ` · ${inputs.nights} night${inputs.nights > 1 ? "s" : ""}` : ""}</p>
         ${savedName ? `<p class="muted">Saved plan · forecast from ${savedName}</p>` : ""}
       </div>
       <div class="actions no-print">
@@ -448,11 +514,11 @@ function render(savedName) {
     </div>
 
     ${p.alerts.map((a) => `<div class="alert ${a.level}">${a.text}</div>`).join("")}
-    ${inputs.ending === "oneway" && p.days === 1 ? `<div class="alert warn">Your hike ends somewhere else. Check the last tram or shuttle time, and tell your ride you'll arrive around ${fmtTime(p.light.finish)}.</div>` : ""}
+    ${rideAlert(p)}
 
     <div class="cards">
-      <div class="card"><div class="label">Time on trail${perDay}</div><div class="big">${formatDuration(p.time.totalHours)}</div>
-        <div class="small">${formatDuration(p.time.movingHours)} moving + ${formatDuration(p.time.breakHours)} breaks</div></div>
+      <div class="card"><div class="label">Time on trail${perDay}</div><div class="big">${formatDuration(p.est.finish.best)} – ${formatDuration(p.est.finish.worst)}</div>
+        <div class="small">If you keep your pace – if you get tired. Breaks included.</div></div>
       <div class="card"><div class="label">${inputs.nights ? "Water for the whole trip" : "Water to carry"}</div><div class="big">${p.water.low}–${p.water.high} L</div>
         <div class="small">${inputs.nights ? "Includes camp and cooking water. Carry only what you need between water sources you can filter." : "Carry the high end if it's hot or you're unsure."}</div></div>
       <div class="card"><div class="label">${p.food.kind === "snacks" ? "Snacks to pack" : "Food for the trip"}</div>
@@ -460,22 +526,24 @@ function render(savedName) {
         <div class="small">${p.food.kind === "snacks" ? "About 200–300 calories per hour" : `About ${p.food.poundsLow}–${p.food.poundsHigh} lb of food`}</div></div>
     </div>
 
-    <h3>Daylight</h3>
+    <h3>Your day</h3>
     <ul class="timeline">
-      <li><span>Sunrise</span><b>${fmtTime(p.first.sunrise)}</b></li>
       <li><span>You start</span><b>${fmtTime(p.start)}</b></li>
-      <li><span>Reach the top (about)</span><b>${fmtTime(p.light.reachTop)}</b></li>
-      <li><span>${p.days > 1 ? "Reach camp (about)" : inputs.ending === "oneway" ? "Reach the end: tram, shuttle or car (about)" : "You finish (about)"}</span><b>${fmtTime(p.light.finish)}</b></li>
+      ${p.days === 1 ? `<li><span>Reach the top</span><b>${fmtRange(p.top)}</b></li>` : ""}
+      <li><span>${p.days > 1 ? "Reach camp (each day)" : inputs.ending === "oneway" ? `Reach the ${endName(inputs)}` : "Back at the start"}</span><b>${fmtRange(p.finish)}</b></li>
       <li><span>Sunset</span><b>${fmtTime(p.first.sunset)}</b></li>
+      ${p.ride?.last ? `<li><span>Last ${p.ride.name} leaves</span><b>${fmtTime(p.ride.last)}</b></li>` : ""}
+      ${p.light.startsInDark ? `<li><span>Sunrise</span><b>${fmtTime(p.first.sunrise)}</b></li>` : ""}
       ${p.light.latestStart < parseLocal(`${inputs.date}T00:00`)
         ? `<li class="hint"><span>This hike is longer than the daylight. Plan to hike part of it in the dark, with a charged headlamp.</span><b></b></li>`
-        : `<li class="hint"><span>Latest start to finish 30 min before sunset</span><b>${fmtTime(p.light.latestStart)}</b></li>`}
+        : `<li class="hint"><span>Latest start to finish 30 min before sunset, even if you get tired</span><b>${fmtTime(p.light.latestStart)}</b></li>`}
     </ul>
-    <p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b>.
-      <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>
+    <p class="range-note">Each range runs from "if you keep your pace" to "if you get tired." Long days have wider ranges because people slow down more as the day goes on.</p>
+    ${p.days === 1 ? `<p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b> (sunrise is ${fmtTime(p.first.sunrise)}).
+      <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>` : ""}
 
     <h3>Weather ${p.days > 1 ? "by day" : "during your hike"}</h3>
-    <p class="small muted">Trailhead forecast. At the top it is usually about ${topF(3.5 * inputs.gainFt / p.days / 1000)}°F colder.</p>
+    <p class="small muted">Trailhead forecast. At the top it is usually about ${topF(3.5 * (p.days === 1 ? inputs.upGainFt : p.est.totalGainFt / p.days) / 1000)}°F colder.</p>
     ${p.days > 1 ? dailyTable(p.daily) : hourlyTable(p.hours)}
 
     <h3>Pack list for these conditions</h3>
@@ -485,7 +553,7 @@ function render(savedName) {
 
   $("save-btn").addEventListener("click", saveTrip);
   $("print-btn").addEventListener("click", () => { track("print"); window.print(); });
-  $("sunrise-btn").addEventListener("click", () => {
+  $("sunrise-btn")?.addEventListener("click", () => {
     track("sunrise-start");
     const t = p.light.sunriseAtTopStart;
     state.inputs = { ...inputs, date: t.toISOString().slice(0, 10), time: t.toISOString().slice(11, 16) };
@@ -494,6 +562,19 @@ function render(savedName) {
     render(savedName);
   });
   out.scrollIntoView({ behavior: "smooth" });
+}
+
+const fmtRange = (r) => `${fmtTime(r.best)} – ${fmtTime(r.worst)}`;
+const fmtBetween = (r) => `between ${fmtTime(r.best)} and ${fmtTime(r.worst)}`;
+
+function rideAlert(p) {
+  if (!p.ride) return "";
+  const { name, last, level } = p.ride;
+  if (level === "danger") return `<div class="alert danger">Even at your pace you'd reach the ${name} around ${fmtTime(p.finish.best)}, after the last one leaves at ${fmtTime(last)}. Start earlier or plan another way down.</div>`;
+  if (level === "warn") return `<div class="alert warn">If you get tired, you could miss the last ${name} at ${fmtTime(last)} (you'd arrive ${fmtBetween(p.finish)}). Start earlier to be safe.</div>`;
+  if (level === "ok") return "";
+  if (name === "car pickup") return `<div class="alert warn">Tell your ride you'll arrive ${fmtBetween(p.finish)}.</div>`;
+  return `<div class="alert warn">Check when the last ${name} leaves and enter it above, so Trail Prep can warn you if you might miss it.</div>`;
 }
 
 function hourlyTable(hours) {
@@ -525,11 +606,16 @@ function saveTrip() {
   renderSaved();
 }
 
+function tripMiles(raw) {
+  const i = normalizeInputs(raw);
+  return Math.round((i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles)) * 10) / 10;
+}
+
 function renderSaved() {
   const trips = loadTrips();
   $("saved").hidden = !trips.length;
   $("saved-list").innerHTML = trips.map((t) => `
-    <li><button type="button" data-open="${t.id}">${t.place.name} · ${t.inputs.date} · ${t.inputs.miles} mi</button>
+    <li><button type="button" data-open="${t.id}">${t.place.name} · ${t.inputs.date} · ${tripMiles(t.inputs)} mi</button>
     <button type="button" class="link" data-del="${t.id}">Delete</button></li>`).join("");
 }
 
@@ -548,7 +634,22 @@ $("saved-list").addEventListener("click", (e) => {
 });
 
 // ---------- Start up ----------
+$("plan-form").addEventListener("input", updateForm);
+$("plan-form").addEventListener("change", updateForm);
+$("gpx-help-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  const box = $("gpx-help");
+  box.hidden = !box.hidden;
+  box.innerHTML = `A GPX file is a route saved as a file. Free ways to get one:
+    <ul>
+      <li><b>CalTopo</b> (caltopo.com, free account): draw the trail on the map, then export it as GPX.</li>
+      <li><b>Garmin, Coros or Apple Watch</b>: a hike you recorded can usually be exported as GPX from the watch's app or website.</li>
+      <li><b>AllTrails</b>: some trail pages let you download the route as GPX (this may need their paid membership).</li>
+    </ul>
+    No file? Just type the miles and climb below.`;
+});
 showPace();
+updateForm();
 const today = new Date();
 $("date").value = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 renderSaved();

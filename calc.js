@@ -5,60 +5,75 @@
 // ---------- Time on trail ----------
 
 // Naismith's rule: 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing.
-// Pace multipliers let people match it to how they actually hike.
+// We add about 10 minutes of rest per hour, and on the way back down about
+// 10 more minutes per 1,000 ft of descent (steep downhill is slower than people expect).
 export const PACES = {
   relaxed: { label: "Relaxed", factor: 1.3 },
   average: { label: "Average", factor: 1.0 },
   fast: { label: "Fast", factor: 0.8 },
-  custom: { label: "My own", factor: 1.0 }, // replaced by the factor learned from a past hike
+  custom: { label: "Your own" }, // learned from a past hike
 };
 
-// Plain-English version of a pace, e.g. "2.3 mph on flat ground, plus 1 hour per 1,540 ft of climbing".
+// "Effort hours": how long a stretch takes at average pace, rests included.
+export function effortHours(miles, gainFt, descentFt = 0) {
+  return (miles / 3 + gainFt / 2000 + descentFt / 6000) * (7 / 6);
+}
+
+// A pace is either a preset ({ factor }) or learned from a past climb ({ ref: { miles, gainFt, hours } }).
+export function paceFactor(pace) {
+  return pace.ref ? pace.ref.hours / effortHours(pace.ref.miles, pace.ref.gainFt) : pace.factor;
+}
+
+// Plain-English version of a pace, e.g. "about 2.3 mph on flat ground, plus 1 hour for every 1,540 ft of climbing".
 export function describePace(factor) {
   const mph = 3 / factor;
   const ftPerHour = Math.round(2000 / factor / 10) * 10;
   return `about ${mph.toFixed(1)} mph on flat ground, plus 1 hour for every ${ftPerHour.toLocaleString()} ft of climbing`;
 }
 
-// Learn someone's pace from a hike they already did: how much slower or faster
-// than "average" they were, counting breaks. 1.0 = average, 1.5 = 50% slower.
-export function paceFactorFromHike({ miles, gainFt, hours }) {
-  const averageHours = (miles / 3 + gainFt / 2000) * (7 / 6); // average pace plus 10 min rest per hour
-  return Math.min(3, Math.max(0.4, hours / averageHours));
+// Turns effort hours into a real time range for this hiker:
+//   best  = you keep your pace the whole way
+//   worst = you get tired. People slow down more the longer the day, so the gap grows with length.
+export function timeRange(effort, pace) {
+  if (pace.ref) {
+    const ratio = effort / effortHours(pace.ref.miles, pace.ref.gainFt);
+    if (ratio <= 1) {
+      const best = pace.ref.hours * ratio;
+      return { best, worst: best * 1.15 };
+    }
+    // Longer than the climb we learned from. Runners use the same idea (Riegel's formula):
+    // twice the distance takes a bit more than twice the time. The tired case slows down much more.
+    return { best: pace.ref.hours * ratio ** 1.06, worst: pace.ref.hours * ratio ** 1.45 };
+  }
+  const best = effort * pace.factor;
+  return { best, worst: best * (1 + Math.min(0.4, 0.03 * best)) };
 }
 
-// How the hike ends changes when you reach the top:
-//   "outback" = back the same way, so the top is halfway and all the climbing comes first
-//   "loop"    = back to the start a different way; without more info we assume the top is ~60% in
-//   "oneway"  = ends somewhere else (tram, shuttle, pickup), so by default the top is at the end
+// How the hike ends:
+//   "outback" = same trail back down, so the top (or turnaround) is halfway
+//   "loop"    = a different trail back to the start
+//   "oneway"  = ends somewhere else: a tram, a shuttle, or a car waiting
 export const ENDINGS = {
-  outback: "Back the same way (out-and-back)",
-  loop: "Back to the start a different way (loop)",
-  oneway: "Somewhere else (tram, shuttle, or a car waiting)",
+  outback: "same trail back",
+  loop: "loop",
+  oneway: "ends at a tram, shuttle or car",
 };
+export const END_TYPES = { tram: "tram", shuttle: "shuttle", car: "car pickup" };
 
-export function estimateHikeTime({ miles, gainFt, pace = "average", customFactor = 1, groupSize = 1, heavyPack = false,
-  ending = "outback", topMiles = null, topGainFt = null }) {
-  let factor = pace === "custom" ? customFactor : PACES[pace]?.factor ?? 1;
-  if (heavyPack) factor *= 1.15;                         // overnight pack slows everyone down
-  if (groupSize > 2) factor *= 1 + 0.05 * (groupSize - 2); // groups move at the pace of the slowest person
-  const hoursFor = (mi, ft) => (mi / 3 + ft / 2000) * factor * (7 / 6); // walking + climbing + ~10 min rest per hour
-
-  const moving = (miles / 3 + gainFt / 2000) * factor;
-  const total = hoursFor(miles, gainFt);
-
-  // Where the top is. People can type it in; otherwise we guess from how the hike ends.
-  let toTop;
-  if (topMiles) toTop = hoursFor(topMiles, topGainFt ?? gainFt);
-  else if (ending === "outback") toTop = hoursFor(miles / 2, gainFt);
-  else if (ending === "oneway") toTop = total;
-  else toTop = total * 0.6;
-
+// The whole hike: the way up to the top (or turnaround point), then the way back or down to the end.
+export function estimateHike({ upMiles, upGainFt, ending, backMiles = 0, backGainFt = 0, pace, heavyPack = false, days = 1 }) {
+  const returnMiles = ending === "outback" ? upMiles : backMiles;
+  // Back at the start, you've come down everything you climbed. When the hike ends at a tram
+  // or car we don't know how far down that is, so no descent time is added.
+  const descentFt = ending === "oneway" ? 0 : upGainFt + backGainFt;
+  const pack = heavyPack ? 1.15 : 1; // a full backpacking pack slows everyone down
+  const effortTop = effortHours(upMiles, upGainFt) * pack;
+  const effortAll = effortHours(upMiles + returnMiles, upGainFt + backGainFt, descentFt) * pack;
   return {
-    movingHours: moving,
-    breakHours: total - moving,
-    totalHours: total,
-    toHighPointHours: Math.min(toTop, total),
+    totalMiles: round1(upMiles + returnMiles),
+    totalGainFt: Math.round(upGainFt + backGainFt),
+    top: timeRange(effortTop, pace),
+    finish: timeRange(effortAll / days, pace), // per hiking day on backpacking trips
   };
 }
 
@@ -116,24 +131,6 @@ export function estimateFood({ totalHours, nights = 0, minFeelsF }) {
   };
 }
 
-// ---------- Daylight ----------
-
-export function daylightPlan({ start, totalHours, toHighPointHours, sunrise, sunset }) {
-  const finish = addHours(start, totalHours);
-  const bufferMs = 30 * 60 * 1000;
-  const latestStart = new Date(sunset.getTime() - bufferMs - totalHours * 3600000);
-  return {
-    finish,
-    reachTop: addHours(start, toHighPointHours),
-    finishesAfterDark: finish.getTime() > sunset.getTime(),
-    tightOnLight: finish.getTime() > sunset.getTime() - bufferMs,
-    startsInDark: start.getTime() < sunrise.getTime(),
-    latestStart,
-    // Start time needed to stand at the top right at sunrise.
-    sunriseAtTopStart: addHours(sunrise, -toHighPointHours),
-  };
-}
-
 // ---------- Gear and layers ----------
 
 // Takes a summary of the weather during the hike and returns a checklist with reasons.
@@ -166,8 +163,9 @@ export function gearChecklist(w) {
 export function warnings({ day, w }) {
   const list = [];
   if (w.thunder) list.push({ level: "danger", text: "Thunderstorms in the forecast. Summit early and be below open ridges by early afternoon." });
-  if (day.finishesAfterDark) list.push({ level: "danger", text: "At this start time you finish after sunset. Start earlier or bring a headlamp and plan for the dark." });
-  else if (day.tightOnLight) list.push({ level: "warn", text: "You finish within 30 minutes of sunset. Very little room for delays." });
+  if (day.darkLikely) list.push({ level: "danger", text: "Even at your pace, you finish after sunset. Start earlier, or bring a charged headlamp and plan to hike in the dark." });
+  else if (day.darkPossible) list.push({ level: "warn", text: "If you get tired, you could finish after sunset. Bring a charged headlamp." });
+  else if (day.tight) list.push({ level: "warn", text: "If you get tired, you finish within 30 minutes of sunset. Little room for delays." });
   if (w.maxFeelsF >= 95) list.push({ level: "danger", text: `Extreme heat: feels like up to ${Math.round(w.maxFeelsF)}°F. Start at sunrise and finish before midday.` });
   else if (w.maxFeelsF >= 85) list.push({ level: "warn", text: `Hot: feels like up to ${Math.round(w.maxFeelsF)}°F. Start early and carry the high end of the water range.` });
   if (w.minFeelsF <= 20) list.push({ level: "danger", text: `Very cold: feels like ${Math.round(w.minFeelsF)}°F. Frostbite risk on exposed skin.` });
@@ -220,7 +218,7 @@ export function milesBetween(a, b) {
 // GPS elevation jitters up and down, so small wiggles under 3 m are ignored;
 // otherwise a flat walk would look like hundreds of feet of climbing.
 export function routeStats(points) {
-  let miles = 0, gainM = 0, lossM = 0, highM = -Infinity, topMiles = 0, topGainM = 0;
+  let miles = 0, gainM = 0, lossM = 0, highM = -Infinity, topMiles = 0, topGainM = 0, topTime = null;
   const hasEle = points.some((p) => Number.isFinite(p.ele));
   let anchor = hasEle ? points.find((p) => Number.isFinite(p.ele)).ele : 0;
   for (let i = 0; i < points.length; i++) {
@@ -228,13 +226,14 @@ export function routeStats(points) {
     if (i > 0) miles += milesBetween(points[i - 1], p);
     if (!hasEle || !Number.isFinite(p.ele)) continue;
     if (p.ele - anchor >= 3) { gainM += p.ele - anchor; anchor = p.ele; }
-    if (p.ele > highM) { highM = p.ele; topMiles = miles; topGainM = gainM; } // remember where the top is
     else if (anchor - p.ele >= 3) { lossM += anchor - p.ele; anchor = p.ele; }
+    if (p.ele > highM) { highM = p.ele; topMiles = miles; topGainM = gainM; topTime = p.time; } // remember where the top is
   }
   const gapMiles = points.length > 1 ? milesBetween(points[0], points[points.length - 1]) : 0;
   // Recorded hikes (not planned routes) have a time on each point.
   const times = points.map((p) => p.time).filter(Number.isFinite);
   const elapsedHours = times.length > 1 ? (Math.max(...times) - Math.min(...times)) / 3600000 : null;
+  const topHours = elapsedHours && Number.isFinite(topTime) ? (topTime - Math.min(...times)) / 3600000 : null;
   return {
     miles: Math.round(miles * 10) / 10,
     gainFt: hasEle ? Math.round((gainM * 3.28084) / 10) * 10 : null,
@@ -247,5 +246,6 @@ export function routeStats(points) {
     gapMiles: Math.round(gapMiles * 10) / 10,
     start: points[0],
     elapsedHours,
+    topHours,
   };
 }
