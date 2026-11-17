@@ -1,10 +1,11 @@
 // Saves the app's files on the phone so Trail Prep opens without signal.
 // Online, it always loads the newest version; offline, it uses the saved copy.
-const CACHE = "trail-prep-v4";
+const CACHE = "trail-prep-v5";
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)));
+  // "reload" skips the browser's short-term cache so we save the newest files, not old ones.
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: "reload" })))));
   self.skipWaiting();
 });
 
@@ -22,7 +23,7 @@ self.addEventListener("fetch", (event) => {
   // Try the network first so updates show up right away, and refresh the saved copy.
   // With no signal, fall back to the saved copy.
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
