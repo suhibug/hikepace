@@ -41,7 +41,11 @@ On a phone, open the site and choose **Add to Home Screen** to use it like an ap
 
 All numbers are rough guides, and the app says so.
 
-- **Time:** Naismith's rule (3 mph, plus 1 hour per 2,000 ft of climbing), adjusted for pace, heavy packs, and group size, plus about 10 minutes of rest per hour.
+- **Time:** Naismith's rule, adjusted for heavy packs and group size, plus about 10 minutes of rest per hour. Each pace in plain numbers:
+  - **Relaxed:** about 2.3 mph on flat ground, plus 1 hour for every 1,540 ft of climbing
+  - **Average:** about 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing
+  - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
+  - **My own pace:** learned from a hike you already did (type it in, or import a GPX you recorded and it reads the times). Saved only on your device.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
 - **Water:** 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature, more for big climbs, plus 2 to 3 liters per night at camp.
 - **Food:** 200 to 300 calories per hour of hiking on day hikes; 2,500 to 4,000 calories (1.5 to 2 lb) per day when backpacking; 10% more in the cold.
@@ -65,7 +69,6 @@ Then open http://localhost:8000.
 - Permits, legal camping, and BLM land
 - Road conditions to the trailhead
 - Group planning (who's coming, everyone's pace and gear)
-- Learning your real pace from past hikes (could read time stamps from a GPX of a hike you already did)
 
 ## License
 

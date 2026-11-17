@@ -54,6 +54,9 @@ button:disabled { opacity: 0.6; }
 .import span { display: block; }
 #gpx-status:not(:empty) { margin-top: 8px; color: var(--text); }
 #gpx-status button { margin-top: 6px; padding: 6px 10px; font-size: 14px; }
+.pace-desc { margin: 4px 0 0; }
+.my-pace { background: var(--bg); border-radius: 12px; padding: 12px; margin-top: 12px; }
+.my-pace p { margin: 4px 0; }
 .or { text-align: center; color: var(--muted); font-size: 13px; margin: 12px 0 0; }
 .chosen { color: var(--brand); font-weight: 600; margin: 6px 0 0; min-height: 1em; }
 .small { font-size: 13px; }

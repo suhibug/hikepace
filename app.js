@@ -2,6 +2,7 @@
 import {
   PACES, estimateHikeTime, tempAtTop, estimateWater, estimateFood, daylightPlan,
   gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
+  describePace, paceFactorFromHike,
 } from "./calc.js";
 
 const $ = (id) => document.getElementById(id);
@@ -167,6 +168,7 @@ function readGpx(text) {
     lat: parseFloat(n.getAttribute("lat")),
     lon: parseFloat(n.getAttribute("lon")),
     ele: parseFloat(n.getElementsByTagName("ele")[0]?.textContent),
+    time: Date.parse(n.getElementsByTagName("time")[0]?.textContent ?? ""),
   })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
   const name = (doc.querySelector("trk > name") || doc.querySelector("rte > name") || doc.querySelector("metadata > name"))?.textContent.trim();
   return { points, name };
@@ -226,6 +228,27 @@ $("gpx").addEventListener("change", async (e) => {
       note.appendChild(btn);
       status.appendChild(note);
     }
+    // A recorded hike (not just a planned route) has times, so it can teach us the hiker's pace.
+    if (r.elapsedHours > 0.25 && r.gainFt !== null) {
+      const rec = document.createElement("div");
+      rec.className = "muted";
+      rec.textContent = `This looks like a hike you recorded: ${formatDuration(r.elapsedHours)} from start to finish.`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Use this hike to learn my pace";
+      btn.addEventListener("click", () => {
+        $("past-miles").value = r.miles;
+        $("past-gain").value = r.gainFt;
+        $("past-hours").value = Math.round(r.elapsedHours * 100) / 100;
+        $("pace").value = "custom";
+        saveMyPace();
+        rec.textContent = "✓ Saved as your pace. Now import or enter the hike you're planning.";
+      });
+      rec.appendChild(document.createElement("br"));
+      rec.appendChild(btn);
+      status.appendChild(rec);
+    }
   } catch {
     status.textContent = "Couldn't read that file. Make sure it's a .gpx route file (most hiking apps can export one).";
   }
@@ -253,15 +276,60 @@ function readInputs() {
     time: $("time").value,
     nights: +$("nights").value,
     pace: $("pace").value,
+    customFactor: loadMyPace()?.factor ?? 1,
     groupSize: +$("group").value || 1,
   };
 }
+
+// ---------- Your own pace ----------
+// Learned from a hike the person already did, and kept only on this device.
+const PACE_KEY = "trailprep.myPace";
+function loadMyPace() {
+  try { return JSON.parse(localStorage.getItem(PACE_KEY)); } catch { return null; }
+}
+
+function saveMyPace() {
+  const miles = +$("past-miles").value, gainFt = +$("past-gain").value || 0, hours = +$("past-hours").value;
+  if (!miles || !hours) {
+    $("past-result").textContent = "Add the distance and how long it took.";
+    return;
+  }
+  const mine = { factor: paceFactorFromHike({ miles, gainFt, hours }), miles, gainFt, hours };
+  try { localStorage.setItem(PACE_KEY, JSON.stringify(mine)); } catch {}
+  track("pace-saved");
+  showPace();
+}
+
+function showPace() {
+  const pace = $("pace").value, mine = loadMyPace();
+  $("my-pace").hidden = pace !== "custom";
+  if (pace !== "custom") {
+    $("pace-desc").textContent = `${PACES[pace].label} means ${describePace(PACES[pace].factor)}.`;
+    return;
+  }
+  if (!mine) {
+    $("pace-desc").textContent = "Enter a hike you already did below, and Trail Prep will use your real pace.";
+    $("past-result").textContent = "";
+    return;
+  }
+  const pct = Math.round((mine.factor - 1) * 100);
+  const vsAverage = Math.abs(pct) < 5 ? "about average" : pct > 0 ? `${pct}% slower than average` : `${-pct}% faster than average`;
+  $("pace-desc").textContent = `Your pace: ${describePace(mine.factor)} (${vsAverage}).`;
+  $("past-result").textContent = `✓ Learned from your ${mine.miles} mi, ${mine.gainFt.toLocaleString()} ft hike that took ${formatDuration(mine.hours)}.`;
+  $("past-miles").value ||= mine.miles;
+  $("past-gain").value ||= mine.gainFt;
+  $("past-hours").value ||= mine.hours;
+}
+
+$("pace").addEventListener("change", showPace);
+$("past-save").addEventListener("click", saveMyPace);
 
 $("plan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!state.place) return showError("Pick a trailhead location first (search, coordinates, or use my location).");
   const inputs = readInputs();
   if (!inputs.miles || !inputs.date || !inputs.time) return showError("Add the distance, date and start time.");
+  if (inputs.pace === "custom" && !loadMyPace()) return showError("Save your pace first (enter a past hike under \"Teach Trail Prep your pace\"), or pick another pace.");
   $("plan-btn").disabled = true;
   $("plan-btn").textContent = "Getting the forecast…";
   try {
@@ -289,7 +357,7 @@ function buildPlan(inputs, forecast) {
   const days = inputs.nights + 1;
   const time = estimateHikeTime({
     miles: inputs.miles / days, gainFt: inputs.gainFt / days,
-    pace: inputs.pace, groupSize: inputs.groupSize, heavyPack: inputs.nights > 0,
+    pace: inputs.pace, customFactor: inputs.customFactor, groupSize: inputs.groupSize, heavyPack: inputs.nights > 0,
   });
 
   const daily = forecast.daily.time.map((t, i) => ({
@@ -468,6 +536,7 @@ $("saved-list").addEventListener("click", (e) => {
 });
 
 // ---------- Start up ----------
+showPace();
 const today = new Date();
 $("date").value = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 renderSaved();

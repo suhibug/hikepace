@@ -60,8 +60,21 @@
             <option value="relaxed">Relaxed</option>
             <option value="average" selected>Average</option>
             <option value="fast">Fast</option>
-          </select></div>
+            <option value="custom">My own pace (from a past hike)</option>
+          </select>
+          <p id="pace-desc" class="small muted pace-desc"></p></div>
         <div><label for="group">People in the group</label><input id="group" type="number" min="1" max="20" value="1"></div>
+      </div>
+      <div id="my-pace" class="my-pace" hidden>
+        <b>Teach Trail Prep your pace</b>
+        <p class="small muted">Enter a hike you already did, or import a GPX you recorded on Strava, Garmin, Coros or your watch (it reads the times for you). Count the whole time from start to finish, breaks included.</p>
+        <div class="grid">
+          <div><label for="past-miles">Past hike distance (miles)</label><input id="past-miles" type="number" min="0.1" step="0.1"></div>
+          <div><label for="past-gain">Past hike elevation gain (feet)</label><input id="past-gain" type="number" min="0" step="10"></div>
+          <div><label for="past-hours">How long it took (hours)</label><input id="past-hours" type="number" min="0.5" step="0.25" placeholder="e.g. 13"></div>
+        </div>
+        <button type="button" id="past-save" class="secondary">Save my pace</button>
+        <p id="past-result" class="small"></p>
       </div>
       <p class="small muted">Tip: copy distance and elevation gain from AllTrails or your trail map.</p>
       <button id="plan-btn" type="submit" class="primary">Plan my hike</button>

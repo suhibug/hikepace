@@ -10,11 +10,26 @@ export const PACES = {
   relaxed: { label: "Relaxed", factor: 1.3 },
   average: { label: "Average", factor: 1.0 },
   fast: { label: "Fast", factor: 0.8 },
+  custom: { label: "My own", factor: 1.0 }, // replaced by the factor learned from a past hike
 };
 
-export function estimateHikeTime({ miles, gainFt, pace = "average", groupSize = 1, heavyPack = false }) {
+// Plain-English version of a pace, e.g. "2.3 mph on flat ground, plus 1 hour per 1,540 ft of climbing".
+export function describePace(factor) {
+  const mph = 3 / factor;
+  const ftPerHour = Math.round(2000 / factor / 10) * 10;
+  return `about ${mph.toFixed(1)} mph on flat ground, plus 1 hour for every ${ftPerHour.toLocaleString()} ft of climbing`;
+}
+
+// Learn someone's pace from a hike they already did: how much slower or faster
+// than "average" they were, counting breaks. 1.0 = average, 1.5 = 50% slower.
+export function paceFactorFromHike({ miles, gainFt, hours }) {
+  const averageHours = (miles / 3 + gainFt / 2000) * (7 / 6); // average pace plus 10 min rest per hour
+  return Math.min(3, Math.max(0.4, hours / averageHours));
+}
+
+export function estimateHikeTime({ miles, gainFt, pace = "average", customFactor = 1, groupSize = 1, heavyPack = false }) {
   const movingHours = miles / 3 + gainFt / 2000;
-  let factor = PACES[pace]?.factor ?? 1;
+  let factor = pace === "custom" ? customFactor : PACES[pace]?.factor ?? 1;
   if (heavyPack) factor *= 1.15;                         // overnight pack slows everyone down
   if (groupSize > 2) factor *= 1 + 0.05 * (groupSize - 2); // groups move at the pace of the slowest person
   const moving = movingHours * factor;
@@ -199,6 +214,9 @@ export function routeStats(points) {
     else if (anchor - p.ele >= 3) { lossM += anchor - p.ele; anchor = p.ele; }
   }
   const gapMiles = points.length > 1 ? milesBetween(points[0], points[points.length - 1]) : 0;
+  // Recorded hikes (not planned routes) have a time on each point.
+  const times = points.map((p) => p.time).filter(Number.isFinite);
+  const elapsedHours = times.length > 1 ? (Math.max(...times) - Math.min(...times)) / 3600000 : null;
   return {
     miles: Math.round(miles * 10) / 10,
     gainFt: hasEle ? Math.round((gainM * 3.28084) / 10) * 10 : null,
@@ -208,5 +226,6 @@ export function routeStats(points) {
     isLoop: gapMiles < 0.2, // starts and ends in the same place
     gapMiles: Math.round(gapMiles * 10) / 10,
     start: points[0],
+    elapsedHours,
   };
 }
