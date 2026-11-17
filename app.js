@@ -201,6 +201,9 @@ $("gpx").addEventListener("change", async (e) => {
 
     $("miles").value = r.miles;
     if (r.gainFt !== null) $("gain").value = r.gainFt;
+    $("ending").value = r.isLoop ? "loop" : "oneway";
+    $("top-miles").value = r.topMiles ?? "";
+    $("top-gain").value = r.topGainFt ?? "";
     const spot = await describeSpot(r.start.lat, r.start.lon);
     choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon });
     $("place").value = name || "";
@@ -214,7 +217,7 @@ $("gpx").addEventListener("change", async (e) => {
     if (!r.isLoop) {
       const note = document.createElement("div");
       note.className = "muted";
-      note.textContent = `This route is one-way (it ends ${r.gapMiles} mi from where it starts). If you'll hike back the same way, tap below.`;
+      note.textContent = `This route is one-way (it ends ${r.gapMiles} mi from where it starts), so I set it to end somewhere else, like a tram or a car waiting. If you'll hike back the same way instead, tap below.`;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "secondary";
@@ -222,6 +225,7 @@ $("gpx").addEventListener("change", async (e) => {
       btn.addEventListener("click", () => {
         $("miles").value = Math.round(r.miles * 2 * 10) / 10;
         if (r.gainFt !== null) $("gain").value = r.outAndBackGainFt;
+        $("ending").value = "outback";
         note.textContent = `✓ Doubled for an out-and-back: ${$("miles").value} mi${r.gainFt !== null ? `, ${(+$("gain").value).toLocaleString()} ft gain` : ""}.`;
       });
       note.appendChild(document.createElement("br"));
@@ -275,6 +279,9 @@ function readInputs() {
     date: $("date").value,
     time: $("time").value,
     nights: +$("nights").value,
+    ending: $("ending").value,
+    topMiles: +$("top-miles").value || null,
+    topGainFt: $("top-gain").value === "" ? null : +$("top-gain").value,
     pace: $("pace").value,
     customFactor: loadMyPace()?.factor ?? 1,
     groupSize: +$("group").value || 1,
@@ -358,6 +365,8 @@ function buildPlan(inputs, forecast) {
   const time = estimateHikeTime({
     miles: inputs.miles / days, gainFt: inputs.gainFt / days,
     pace: inputs.pace, customFactor: inputs.customFactor, groupSize: inputs.groupSize, heavyPack: inputs.nights > 0,
+    ending: inputs.ending ?? "outback",
+    topMiles: days === 1 ? inputs.topMiles : null, topGainFt: days === 1 ? inputs.topGainFt : null,
   });
 
   const daily = forecast.daily.time.map((t, i) => ({
@@ -439,6 +448,7 @@ function render(savedName) {
     </div>
 
     ${p.alerts.map((a) => `<div class="alert ${a.level}">${a.text}</div>`).join("")}
+    ${inputs.ending === "oneway" && p.days === 1 ? `<div class="alert warn">Your hike ends somewhere else. Check the last tram or shuttle time, and tell your ride you'll arrive around ${fmtTime(p.light.finish)}.</div>` : ""}
 
     <div class="cards">
       <div class="card"><div class="label">Time on trail${perDay}</div><div class="big">${formatDuration(p.time.totalHours)}</div>
@@ -455,9 +465,11 @@ function render(savedName) {
       <li><span>Sunrise</span><b>${fmtTime(p.first.sunrise)}</b></li>
       <li><span>You start</span><b>${fmtTime(p.start)}</b></li>
       <li><span>Reach the top (about)</span><b>${fmtTime(p.light.reachTop)}</b></li>
-      <li><span>${p.days > 1 ? "Reach camp (about)" : "You finish (about)"}</span><b>${fmtTime(p.light.finish)}</b></li>
+      <li><span>${p.days > 1 ? "Reach camp (about)" : inputs.ending === "oneway" ? "Reach the end: tram, shuttle or car (about)" : "You finish (about)"}</span><b>${fmtTime(p.light.finish)}</b></li>
       <li><span>Sunset</span><b>${fmtTime(p.first.sunset)}</b></li>
-      <li class="hint"><span>Latest start to finish 30 min before sunset</span><b>${fmtTime(p.light.latestStart)}</b></li>
+      ${p.light.latestStart < parseLocal(`${inputs.date}T00:00`)
+        ? `<li class="hint"><span>This hike is longer than the daylight. Plan to hike part of it in the dark, with a charged headlamp.</span><b></b></li>`
+        : `<li class="hint"><span>Latest start to finish 30 min before sunset</span><b>${fmtTime(p.light.latestStart)}</b></li>`}
     </ul>
     <p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b>.
       <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>

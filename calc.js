@@ -27,20 +27,38 @@ export function paceFactorFromHike({ miles, gainFt, hours }) {
   return Math.min(3, Math.max(0.4, hours / averageHours));
 }
 
-export function estimateHikeTime({ miles, gainFt, pace = "average", customFactor = 1, groupSize = 1, heavyPack = false }) {
-  const movingHours = miles / 3 + gainFt / 2000;
+// How the hike ends changes when you reach the top:
+//   "outback" = back the same way, so the top is halfway and all the climbing comes first
+//   "loop"    = back to the start a different way; without more info we assume the top is ~60% in
+//   "oneway"  = ends somewhere else (tram, shuttle, pickup), so by default the top is at the end
+export const ENDINGS = {
+  outback: "Back the same way (out-and-back)",
+  loop: "Back to the start a different way (loop)",
+  oneway: "Somewhere else (tram, shuttle, or a car waiting)",
+};
+
+export function estimateHikeTime({ miles, gainFt, pace = "average", customFactor = 1, groupSize = 1, heavyPack = false,
+  ending = "outback", topMiles = null, topGainFt = null }) {
   let factor = pace === "custom" ? customFactor : PACES[pace]?.factor ?? 1;
   if (heavyPack) factor *= 1.15;                         // overnight pack slows everyone down
   if (groupSize > 2) factor *= 1 + 0.05 * (groupSize - 2); // groups move at the pace of the slowest person
-  const moving = movingHours * factor;
-  const breaks = moving * (10 / 60);                      // about 10 minutes of rest per hour
-  const total = moving + breaks;
+  const hoursFor = (mi, ft) => (mi / 3 + ft / 2000) * factor * (7 / 6); // walking + climbing + ~10 min rest per hour
+
+  const moving = (miles / 3 + gainFt / 2000) * factor;
+  const total = hoursFor(miles, gainFt);
+
+  // Where the top is. People can type it in; otherwise we guess from how the hike ends.
+  let toTop;
+  if (topMiles) toTop = hoursFor(topMiles, topGainFt ?? gainFt);
+  else if (ending === "outback") toTop = hoursFor(miles / 2, gainFt);
+  else if (ending === "oneway") toTop = total;
+  else toTop = total * 0.6;
+
   return {
     movingHours: moving,
-    breakHours: breaks,
+    breakHours: total - moving,
     totalHours: total,
-    // On an out-and-back or summit hike, the climb takes longer than the descent.
-    toHighPointHours: total * 0.6,
+    toHighPointHours: Math.min(toTop, total),
   };
 }
 
@@ -202,15 +220,15 @@ export function milesBetween(a, b) {
 // GPS elevation jitters up and down, so small wiggles under 3 m are ignored;
 // otherwise a flat walk would look like hundreds of feet of climbing.
 export function routeStats(points) {
-  let miles = 0, gainM = 0, lossM = 0, highM = -Infinity;
+  let miles = 0, gainM = 0, lossM = 0, highM = -Infinity, topMiles = 0, topGainM = 0;
   const hasEle = points.some((p) => Number.isFinite(p.ele));
   let anchor = hasEle ? points.find((p) => Number.isFinite(p.ele)).ele : 0;
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
     if (i > 0) miles += milesBetween(points[i - 1], p);
     if (!hasEle || !Number.isFinite(p.ele)) continue;
-    highM = Math.max(highM, p.ele);
     if (p.ele - anchor >= 3) { gainM += p.ele - anchor; anchor = p.ele; }
+    if (p.ele > highM) { highM = p.ele; topMiles = miles; topGainM = gainM; } // remember where the top is
     else if (anchor - p.ele >= 3) { lossM += anchor - p.ele; anchor = p.ele; }
   }
   const gapMiles = points.length > 1 ? milesBetween(points[0], points[points.length - 1]) : 0;
@@ -223,6 +241,8 @@ export function routeStats(points) {
     // Hiking back the same way, every descent on the way out becomes a climb.
     outAndBackGainFt: hasEle ? Math.round(((gainM + lossM) * 3.28084) / 10) * 10 : null,
     highFt: hasEle ? Math.round(highM * 3.28084) : null,
+    topMiles: hasEle ? Math.round(topMiles * 10) / 10 : null,
+    topGainFt: hasEle ? Math.round((topGainM * 3.28084) / 10) * 10 : null,
     isLoop: gapMiles < 0.2, // starts and ends in the same place
     gapMiles: Math.round(gapMiles * 10) / 10,
     start: points[0],

@@ -31,7 +31,7 @@ The most annoying parts of planning were unpredictable weather, not knowing the 
 ## How to use it
 
 1. Import a GPX route, or search for the trail, a landmark, or the nearest town (or paste coordinates, or tap 📍).
-2. Enter the distance and elevation gain (copy them from AllTrails or your map), date, start time, trip type, pace, and group size.
+2. Enter the total distance you'll walk and the elevation gain (copy them from AllTrails or your map), how the hike ends (out-and-back, loop, or somewhere else like a tram or a waiting car), and optionally the miles and climb to the top. Then the date, start time, trip type, pace, and group size.
 3. Tap **Plan my hike**.
 4. Tap **Save for offline** before you lose signal.
 
@@ -46,6 +46,7 @@ All numbers are rough guides, and the app says so.
   - **Average:** about 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing
   - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
   - **My own pace:** learned from a hike you already did (type it in, or import a GPX you recorded and it reads the times). Saved only on your device.
+- **When you reach the top:** out-and-back hikes put the top halfway with all the climbing first; hikes that end somewhere else (like Cactus to Clouds ending at the tram) put the top at the end unless you enter miles and climb to the top; loops assume the top is about 60% of the way. Imported GPX routes fill this in automatically.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
 - **Water:** 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature, more for big climbs, plus 2 to 3 liters per night at camp.
 - **Food:** 200 to 300 calories per hour of hiking on day hikes; 2,500 to 4,000 calories (1.5 to 2 lb) per day when backpacking; 10% more in the cold.

@@ -44,8 +44,16 @@
       <p id="place-chosen" class="chosen"></p>
 
       <div class="grid">
-        <div><label for="miles">Total distance (miles)</label><input id="miles" type="number" min="0.1" step="0.1" required></div>
+        <div><label for="miles">Total distance you'll walk (miles)</label><input id="miles" type="number" min="0.1" step="0.1" required></div>
         <div><label for="gain">Elevation gain (feet)</label><input id="gain" type="number" min="0" step="10" value="0"></div>
+        <div><label for="ending">How does your hike end?</label>
+          <select id="ending">
+            <option value="outback">Back the same way (out-and-back)</option>
+            <option value="loop">Back to the start a different way (loop)</option>
+            <option value="oneway">Somewhere else (tram, shuttle, or a car waiting)</option>
+          </select></div>
+        <div><label for="top-miles">Miles to the top <span class="muted">(optional)</span></label><input id="top-miles" type="number" min="0" step="0.1" placeholder="e.g. 16"></div>
+        <div><label for="top-gain">Climb to the top, feet <span class="muted">(optional)</span></label><input id="top-gain" type="number" min="0" step="10" placeholder="e.g. 10400"></div>
         <div><label for="date">Date</label><input id="date" type="date" required></div>
         <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
         <div><label for="nights">Trip type</label>
@@ -76,7 +84,7 @@
         <button type="button" id="past-save" class="secondary">Save my pace</button>
         <p id="past-result" class="small"></p>
       </div>
-      <p class="small muted">Tip: copy distance and elevation gain from AllTrails or your trail map.</p>
+      <p class="small muted">Tip: copy distance and elevation gain from AllTrails or your trail map. Add "to the top" numbers when the top isn't halfway, like a long climb that ends at a tram.</p>
       <button id="plan-btn" type="submit" class="primary">Plan my hike</button>
       <p class="privacy">🔒 Your trips are saved only on this device. They are never uploaded, and nobody else can see them. We only count visits anonymously (no cookies, no names, no exact places).</p>
     </form>
