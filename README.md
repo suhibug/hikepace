@@ -9,6 +9,8 @@ A free hike planner that tells you, before you leave:
 - **A pack list for the conditions** (layers, rain shell, headlamp, sunscreen, sleeping bag rating) with the reason for each item
 - **Safety warnings** for storms, heat, cold, strong wind, and finishing after dark
 
+**Import a route:** load a GPX file from AllTrails, Strava, Garmin, Coros, or most other hiking apps, and Trail Prep fills in the trailhead, distance, and elevation gain. The file is read on your device and never uploaded.
+
 It works **offline**: plan a trip while you have signal, tap **Save for offline**, and the plan opens on the trail with no signal.
 
 It's free, needs no account, and has no ads. Weather comes from [Open-Meteo](https://open-meteo.com/), a free weather service.
@@ -28,7 +30,7 @@ The most annoying parts of planning were unpredictable weather, not knowing the 
 
 ## How to use it
 
-1. Search for the trailhead or nearest town (or paste coordinates, or tap 📍).
+1. Import a GPX route, or search for the trail, a landmark, or the nearest town (or paste coordinates, or tap 📍).
 2. Enter the distance and elevation gain (copy them from AllTrails or your map), date, start time, trip type, pace, and group size.
 3. Tap **Plan my hike**.
 4. Tap **Save for offline** before you lose signal.
@@ -63,7 +65,7 @@ Then open http://localhost:8000.
 - Permits, legal camping, and BLM land
 - Road conditions to the trailhead
 - Group planning (who's coming, everyone's pace and gear)
-- Learning your real pace from past hikes
+- Learning your real pace from past hikes (could read time stamps from a GPX of a hike you already did)
 
 ## License
 

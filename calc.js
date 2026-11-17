@@ -171,3 +171,42 @@ export function formatDuration(hours) {
 }
 function round1(x) { return Math.round(x * 10) / 10; }
 function roundTo(x, step) { return Math.round(x / step) * step; }
+
+// ---------- Routes from GPX files ----------
+
+// Distance between two GPS points in miles (haversine formula).
+export function milesBetween(a, b) {
+  const R = 3958.8; // Earth's radius in miles
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Turns a list of points ({lat, lon, ele in meters}) into trail stats.
+// GPS elevation jitters up and down, so small wiggles under 3 m are ignored;
+// otherwise a flat walk would look like hundreds of feet of climbing.
+export function routeStats(points) {
+  let miles = 0, gainM = 0, lossM = 0, highM = -Infinity;
+  const hasEle = points.some((p) => Number.isFinite(p.ele));
+  let anchor = hasEle ? points.find((p) => Number.isFinite(p.ele)).ele : 0;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (i > 0) miles += milesBetween(points[i - 1], p);
+    if (!hasEle || !Number.isFinite(p.ele)) continue;
+    highM = Math.max(highM, p.ele);
+    if (p.ele - anchor >= 3) { gainM += p.ele - anchor; anchor = p.ele; }
+    else if (anchor - p.ele >= 3) { lossM += anchor - p.ele; anchor = p.ele; }
+  }
+  const gapMiles = points.length > 1 ? milesBetween(points[0], points[points.length - 1]) : 0;
+  return {
+    miles: Math.round(miles * 10) / 10,
+    gainFt: hasEle ? Math.round((gainM * 3.28084) / 10) * 10 : null,
+    // Hiking back the same way, every descent on the way out becomes a climb.
+    outAndBackGainFt: hasEle ? Math.round(((gainM + lossM) * 3.28084) / 10) * 10 : null,
+    highFt: hasEle ? Math.round(highM * 3.28084) : null,
+    isLoop: gapMiles < 0.2, // starts and ends in the same place
+    gapMiles: Math.round(gapMiles * 10) / 10,
+    start: points[0],
+  };
+}

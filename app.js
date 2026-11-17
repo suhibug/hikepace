@@ -1,7 +1,7 @@
 // Trail Prep: page logic. Weather comes from Open-Meteo (free, no account or key).
 import {
   PACES, estimateHikeTime, tempAtTop, estimateWater, estimateFood, daylightPlan,
-  gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration,
+  gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
 } from "./calc.js";
 
 const $ = (id) => document.getElementById(id);
@@ -153,6 +153,82 @@ $("place-gps").addEventListener("click", () => {
     (pos) => choosePlace({ name: "My location", latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
     () => alert("Could not get your location."),
   );
+});
+
+// ---------- Import a route (GPX) ----------
+// GPX is the route file almost every hiking app can export. Reading it happens
+// entirely on the device: the file is never uploaded anywhere.
+function readGpx(text) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("Not a GPX file");
+  let nodes = [...doc.getElementsByTagName("trkpt")];
+  if (!nodes.length) nodes = [...doc.getElementsByTagName("rtept")];
+  const points = nodes.map((n) => ({
+    lat: parseFloat(n.getAttribute("lat")),
+    lon: parseFloat(n.getAttribute("lon")),
+    ele: parseFloat(n.getElementsByTagName("ele")[0]?.textContent),
+  })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const name = (doc.querySelector("trk > name") || doc.querySelector("rte > name") || doc.querySelector("metadata > name"))?.textContent.trim();
+  return { points, name };
+}
+
+// Look up which town and state the route starts in, so the forecast and labels make sense.
+async function describeSpot(lat, lon) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=12&addressdetails=1&lat=${lat}&lon=${lon}`, { headers: { "Accept-Language": "en" } });
+    const a = (await res.json()).address || {};
+    return {
+      area: [a.city || a.town || a.village || a.county, a.state, a.country_code?.toUpperCase()].filter(Boolean).join(", "),
+      region: a.country_code === "us" ? a.state : a.country,
+    };
+  } catch {
+    return { area: "", region: "Unknown" };
+  }
+}
+
+$("gpx").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // lets the same file be picked again later
+  if (!file) return;
+  const status = $("gpx-status");
+  status.textContent = "Reading your route…";
+  try {
+    const { points, name } = readGpx(await file.text());
+    if (points.length < 2) throw new Error("No route points");
+    const r = routeStats(points);
+
+    $("miles").value = r.miles;
+    if (r.gainFt !== null) $("gain").value = r.gainFt;
+    const spot = await describeSpot(r.start.lat, r.start.lon);
+    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon });
+    $("place").value = name || "";
+    track("gpx-import");
+
+    status.innerHTML = "";
+    const line = document.createElement("div");
+    line.textContent = `✓ Imported ${name ? `"${name}"` : "your route"}: ${r.miles} mi` +
+      (r.gainFt !== null ? `, ${r.gainFt.toLocaleString()} ft gain, high point ${r.highFt.toLocaleString()} ft.` : ". This file has no elevation, so please add the elevation gain yourself.");
+    status.appendChild(line);
+    if (!r.isLoop) {
+      const note = document.createElement("div");
+      note.className = "muted";
+      note.textContent = `This route is one-way (it ends ${r.gapMiles} mi from where it starts). If you'll hike back the same way, tap below.`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary";
+      btn.textContent = "Hiking back the same way? Make it out-and-back";
+      btn.addEventListener("click", () => {
+        $("miles").value = Math.round(r.miles * 2 * 10) / 10;
+        if (r.gainFt !== null) $("gain").value = r.outAndBackGainFt;
+        note.textContent = `✓ Doubled for an out-and-back: ${$("miles").value} mi${r.gainFt !== null ? `, ${(+$("gain").value).toLocaleString()} ft gain` : ""}.`;
+      });
+      note.appendChild(document.createElement("br"));
+      note.appendChild(btn);
+      status.appendChild(note);
+    }
+  } catch {
+    status.textContent = "Couldn't read that file. Make sure it's a .gpx route file (most hiking apps can export one).";
+  }
 });
 
 // ---------- Forecast ----------

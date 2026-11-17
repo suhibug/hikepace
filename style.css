@@ -49,6 +49,12 @@ button:disabled { opacity: 0.6; }
 .place-results li { margin: 4px 0; color: var(--muted); font-size: 14px; }
 .place-results button { width: 100%; text-align: left; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 .tag { font-size: 12px; background: var(--brand); color: #fff; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+.import { background: var(--bg); border: 1px dashed var(--brand); border-radius: 12px; padding: 12px; }
+.import-btn { display: inline-block; margin: 0 0 4px; padding: 9px 14px; border-radius: 10px; background: var(--brand); color: #fff; cursor: pointer; }
+.import span { display: block; }
+#gpx-status:not(:empty) { margin-top: 8px; color: var(--text); }
+#gpx-status button { margin-top: 6px; padding: 6px 10px; font-size: 14px; }
+.or { text-align: center; color: var(--muted); font-size: 13px; margin: 12px 0 0; }
 .chosen { color: var(--brand); font-weight: 600; margin: 6px 0 0; min-height: 1em; }
 .small { font-size: 13px; }
 .muted { color: var(--muted); }

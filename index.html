@@ -26,6 +26,14 @@
     <form id="plan-form" class="panel">
       <h2>Plan a hike</h2>
 
+      <div class="import">
+        <label for="gpx" class="import-btn">📂 Import a route (GPX file)</label>
+        <input type="file" id="gpx" hidden>
+        <span class="small muted">From AllTrails, Strava, Garmin, Coros and more. Fills in the trailhead, distance and elevation for you.</span>
+        <div id="gpx-status" class="small"></div>
+      </div>
+      <p class="or"><span>or type it in</span></p>
+
       <label for="place">Trail, landmark, town, or coordinates</label>
       <div class="row">
         <input id="place" placeholder="e.g. Soldier Pass Trail, Sedona  ·  or 34.885, -111.782" autocomplete="off">

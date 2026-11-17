@@ -1,6 +1,6 @@
 // Saves the app's files on the phone so Trail Prep opens without signal.
 // Online, it always loads the newest version; offline, it uses the saved copy.
-const CACHE = "trail-prep-v5";
+const CACHE = "trail-prep-v6";
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
