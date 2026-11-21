@@ -7,9 +7,13 @@
 // Naismith's rule: 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing.
 // We add about 10 minutes of rest per hour, and on the way back down about
 // 10 more minutes per 1,000 ft of descent (steep downhill is slower than people expect).
+// The factors come from real hikes in the Trail Prep survey (Nov 2026, 6 timed hikes):
+// people who called themselves "fast" matched Naismith's rule, but "average" hikers took
+// about 1.3-1.4x as long once long breaks at the top are taken out. So "average" is 1.2 here
+// (1.2 x the 10-minute rests above ≈ 1.4x Naismith), and "relaxed" is a step slower than that.
 export const PACES = {
-  relaxed: { label: "Relaxed", factor: 1.3 },
-  average: { label: "Average", factor: 1.0 },
+  relaxed: { label: "Relaxed", factor: 1.5 },
+  average: { label: "Average", factor: 1.2 },
   fast: { label: "Fast", factor: 0.8 },
   custom: { label: "Your own" }, // learned from a past hike
 };
@@ -274,4 +278,127 @@ export function routeStats(points) {
     elapsedHours,
     topHours,
   };
+}
+
+// ---------- Where to camp (backpacking) ----------
+// The idea: walk the route at the hiker's own pace, see how far they get before it's too dark
+// to set up a tent, and list the campsites near the trail they can reach in time.
+
+// Hours from the start to every point of a route, at "effort" pace (before the hiker's pace is applied).
+// Uses the same rule as the rest of the app, segment by segment, so steep parts count as slow.
+// GPS elevation jitters, so changes under 3 m are ignored (same as routeStats).
+export function routeEffort(points) {
+  const out = [{ mile: 0, effort: 0 }];
+  let miles = 0, effort = 0, anchor = points.find((p) => Number.isFinite(p.ele))?.ele ?? 0;
+  for (let i = 1; i < points.length; i++) {
+    const seg = milesBetween(points[i - 1], points[i]);
+    let up = 0, down = 0;
+    const ele = points[i].ele;
+    if (Number.isFinite(ele)) {
+      if (ele - anchor >= 3) { up = (ele - anchor) * 3.28084; anchor = ele; }
+      else if (anchor - ele >= 3) { down = (anchor - ele) * 3.28084; anchor = ele; }
+    }
+    miles += seg;
+    effort += effortHours(seg, up, down);
+    out.push({ mile: miles, effort });
+  }
+  return out;
+}
+
+// Campsites near the route that can be reached before dark.
+//   points:  the route ({ lat, lon, ele })
+//   places:  rows from data/places tiles ([lat, lon, kind, name, flags, extra])
+//   start:   Date the hike starts · sunset: Date of sunset that day
+//   pace:    the hiker's pace (same object the rest of the app uses)
+//   slow:    extra slow-down (heavy pack, thin air), e.g. 1.15
+// Each campsite gets a best-case and a tired-case arrival time:
+//   "easy"  = reached with time to set up (45 min before sunset) even if you get tired
+//   "maybe" = only if you keep your pace
+//   "late"  = after dark, so not suggested
+export const SETUP_HOURS = 0.75;
+export function campsAlongRoute({ points, places, start, sunset, pace, slow = 1, maxOffTrailMi = 0.35 }) {
+  const track = routeEffort(points);
+  // Checking every GPS point is slow on a phone, so use about one point every 0.05 mi.
+  const sample = [];
+  for (let i = 0; i < points.length; i++) {
+    if (!sample.length || track[i].mile - track[sample[sample.length - 1]].mile >= 0.05 || i === points.length - 1) sample.push(i);
+  }
+  const cutoff = addHours(sunset, -SETUP_HOURS);
+  const water = places.filter((p) => p[2] === "spring" || p[2] === "water");
+  const camps = [];
+  for (const place of places) {
+    if (place[2] !== "camp" && place[2] !== "ground") continue;
+    const spot = { lat: place[0], lon: place[1] };
+    // Closest point on the route. The first time the trail passes near it counts (you'd camp the first time you reach it).
+    let best = null;
+    for (const i of sample) {
+      const d = milesBetween(points[i], spot);
+      if (d <= maxOffTrailMi && (!best || d < best.d - 0.02)) { best = { i, d }; if (d < 0.05) break; }
+    }
+    if (!best) continue;
+    // Walking off the trail to the site: about 1.5 mph.
+    const effort = track[best.i].effort * slow + best.d / 1.5;
+    const range = timeRange(effort, pace);
+    const arriveBest = addHours(start, range.best), arriveWorst = addHours(start, range.worst);
+    const status = arriveWorst <= cutoff ? "easy" : arriveBest <= cutoff ? "maybe" : "late";
+    // Nearest water to the campsite, within a mile.
+    let nearWater = null;
+    for (const w of water) {
+      const d = milesBetween(spot, { lat: w[0], lon: w[1] });
+      if (d <= 1 && (!nearWater || d < nearWater.d)) nearWater = { d, name: w[3], kind: w[2], drinkable: w[4].includes("d") };
+    }
+    camps.push({
+      lat: place[0], lon: place[1], kind: place[2], name: place[3], flags: place[4], ridbId: place[5],
+      mile: round1(track[best.i].mile), offTrailMi: round1(best.d), arriveBest, arriveWorst, status, water: nearWater,
+    });
+  }
+  camps.sort((a, b) => a.mile - b.mile);
+  // Where you'll be by set-up time even if you get tired: the last route point you reach in time.
+  // Useful when no campsite is mapped, since dispersed camping may still be allowed there.
+  let reach = null;
+  for (const i of sample) {
+    const r = timeRange(track[i].effort * slow, pace);
+    if (addHours(start, r.worst) > cutoff) break;
+    reach = { mile: round1(track[i].mile), lat: points[i].lat, lon: points[i].lon, end: i === points.length - 1 };
+  }
+  // The pick: the farthest campsite you can reach easily, preferring one with water within half a mile.
+  const easy = camps.filter((c) => c.status === "easy");
+  const pick = [...easy].reverse().find((c) => c.water && c.water.d <= 0.5) || easy[easy.length - 1] || null;
+  return { camps, pick, cutoff, reach };
+}
+
+// Springs and taps within a quarter mile of the route, with the mile you reach them.
+export function waterAlongRoute(points, places, maxOffTrailMi = 0.25) {
+  const track = routeEffort(points);
+  const found = [];
+  for (const place of places) {
+    if (place[2] !== "spring" && place[2] !== "water") continue;
+    let best = null;
+    for (let i = 0; i < points.length; i += 5) {
+      const d = milesBetween(points[i], { lat: place[0], lon: place[1] });
+      if (d <= maxOffTrailMi && (!best || d < best.d)) best = { i, d };
+    }
+    if (best) found.push({ name: place[3], kind: place[2], drinkable: place[4].includes("d"), mile: round1(track[best.i].mile), offTrailMi: round1(best.d) });
+  }
+  return found.sort((a, b) => a.mile - b.mile);
+}
+
+// What the land manager usually allows for camping outside a campground. Always a rough guide:
+// rules change (fire bans, closures), so the app tells people to check before they go.
+// Codes come from the Bureau of Land Management's land map (Surface Management Agency).
+export function campRules(agency) {
+  const rules = {
+    BLM: { label: "BLM land", rule: "Dispersed camping is usually allowed (up to 14 days).", ok: true },
+    USFS: { label: "National Forest", rule: "Dispersed camping is usually allowed. Check fire rules and closures.", ok: true },
+    NPS: { label: "National Park", rule: "Backcountry camping needs a permit, only in allowed spots.", ok: false },
+    FWS: { label: "Wildlife refuge", rule: "Camping is usually not allowed.", ok: false },
+    BIA: { label: "Tribal land", rule: "Needs permission or a permit from the tribe.", ok: false },
+    DOD: { label: "Military land", rule: "No public access.", ok: false },
+    USBR: { label: "Bureau of Reclamation", rule: "Rules vary. Check the local office.", ok: null },
+    ST: { label: "State Trust land", rule: "Camping needs a state recreation permit.", ok: null },
+    SDA: { label: "State land", rule: "Rules vary. Check the state office.", ok: null },
+    LG: { label: "City or county land", rule: "Camping is usually not allowed outside campgrounds.", ok: false },
+    PVT: { label: "Private land", rule: "Ask the owner first.", ok: false },
+  };
+  return rules[agency] || { label: "Unknown land", rule: "Check the local rules before camping here.", ok: null };
 }

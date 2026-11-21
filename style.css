@@ -143,3 +143,41 @@ footer a { color: var(--brand); }
   .panel { border: 0; padding: 0; }
   #plan-form { display: none; }
 }
+
+/* ---------- Where to camp / water on the way ---------- */
+.camp { background: var(--bg); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+.camp.pick { border: 2px solid var(--brand); }
+.camp.reach { border: 1px dashed var(--brand-2); }
+.camp .label { font-size: 12px; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: 0.5px; }
+.camp .small { margin-top: 3px; }
+.camp a { color: var(--brand); }
+.camp-list, .water-list { list-style: none; padding: 0; margin: 0; }
+.water-list li { padding: 7px 0; border-bottom: 1px dashed var(--line); }
+.water-list li > span:first-child { display: inline-block; min-width: 64px; font-weight: 700; color: var(--brand); }
+.tag.easy { background: var(--brand); }
+.tag.maybe { background: var(--brand-2); }
+.land.ok { color: var(--brand); }
+.land.no { color: var(--danger-text); }
+.land.check { color: var(--warn-text); }
+
+/* ---------- Phones: feel like an app (like drekka) ---------- */
+/* Room for the notch and the home bar when it's installed to the home screen. */
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); -webkit-tap-highlight-color: transparent; }
+header { padding-top: max(18px, env(safe-area-inset-top)); }
+/* Fingers need bigger targets than mouse pointers (about 44 px). */
+button, .import-btn, input, select { min-height: 44px; }
+@media (max-width: 560px) {
+  main { padding: 0 10px; }
+  .panel { border-radius: 18px; padding: 16px 14px; margin: 10px 0; }
+  header { padding-left: 14px; padding-right: 14px; }
+  header h1 { font-size: 22px; }
+  .grid, .cards { grid-template-columns: 1fr; }
+  .actions { width: 100%; }
+  .actions button { flex: 1; }
+  .card .big { font-size: 24px; }
+  /* The main button stays at the bottom of the screen, within thumb reach, while filling the form. */
+  #plan-btn { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 5; box-shadow: 0 6px 18px rgba(0,0,0,0.18); border-radius: 14px; }
+  .timeline li { gap: 10px; }
+  .timeline li b { text-align: right; }
+  footer { padding-bottom: calc(30px + env(safe-area-inset-bottom)); }
+}

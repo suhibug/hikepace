@@ -2,11 +2,13 @@
 import {
   PACES, ENDINGS, END_TYPES, estimateHike, paceFactor, describePace, tempAtTop, estimateWater, estimateFood,
   gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
+  campsAlongRoute, waterAlongRoute, campRules, milesBetween,
 } from "./calc.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = "trailprep.trips";
-const state = { place: null, forecast: null, inputs: null };
+// route = the GPX points when a route was imported (needed for "where can I camp?" and water along the way).
+const state = { place: null, forecast: null, inputs: null, route: null };
 
 // ---------- Times ----------
 // Open-Meteo gives times in the trail's own time zone. We keep every time as a
@@ -109,6 +111,7 @@ function placeLabel(p) {
 }
 
 function choosePlace(p) {
+  state.route = p.route || null; // a searched place has no route; an imported GPX does
   state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, region: p.region || "Unknown" };
   $("place-results").innerHTML = "";
   $("place-chosen").textContent = `✓ ${state.place.name} (${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)})`;
@@ -233,7 +236,7 @@ $("gpx").addEventListener("change", async (e) => {
     setVal("back-gain", r.gainFt !== null ? Math.max(0, r.gainFt - r.topGainFt) : "");
     updateForm();
     const spot = await describeSpot(r.start.lat, r.start.lon);
-    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon,
+    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon, route: points,
       elevFt: Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined });
     $("place").value = name || "";
     track("gpx-import");
@@ -581,6 +584,8 @@ function render(savedName) {
     ${p.days === 1 ? `<p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b> (sunrise is ${fmtTime(p.first.sunrise)}).
       <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>` : ""}
 
+    <div id="camp-box"></div>
+
     <h3>Weather ${p.days > 1 ? "by day" : "during your hike"}</h3>
     ${p.days > 1 ? dailyCards(p.daily) : weatherChart(p)}
 
@@ -590,6 +595,7 @@ function render(savedName) {
     <p class="disclaimer">All estimates are a rough guide based on standard hiking rules of thumb and the forecast. Weather in the mountains changes fast. Check official sources (NWS, park and forest offices) and turn back if conditions change.</p>`;
 
   if (p.days === 1) wireChart(p);
+  fillCampBox(p, inputs);
   $("save-btn").addEventListener("click", saveTrip);
   $("print-btn").addEventListener("click", () => { track("print"); window.print(); });
   $("sunrise-btn")?.addEventListener("click", () => {
@@ -601,6 +607,139 @@ function render(savedName) {
     render(savedName);
   });
   out.scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- Where to camp and where to find water ----------
+// Campsites, springs and taps come from small files in data/places/ (built from OpenStreetMap and
+// Recreation.gov by tools/build-places.mjs). Each file covers a half-degree square, so the phone
+// only downloads the area around the hike.
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+let placeIndex = null;
+const tileCache = new Map();
+async function placesAround(minLat, minLon, maxLat, maxLon) {
+  placeIndex ??= await fetch("data/places/index.json").then((r) => r.json()).catch(() => ({ tiles: [], tile: 0.5 }));
+  const t = placeIndex.tile, have = new Set(placeIndex.tiles);
+  const rows = [];
+  for (let la = Math.floor(minLat / t) * t; la <= maxLat; la += t) {
+    for (let lo = Math.floor(minLon / t) * t; lo <= maxLon; lo += t) {
+      const key = `${la.toFixed(1)}_${lo.toFixed(1)}`;
+      if (!have.has(key)) continue;
+      if (!tileCache.has(key)) tileCache.set(key, fetch(`data/places/${key}.json`).then((r) => r.json()).catch(() => []));
+      rows.push(...(await tileCache.get(key)));
+    }
+  }
+  return rows;
+}
+
+// Who manages the land at a spot, from the Bureau of Land Management's free land map.
+// Returns an agency code like "BLM", "USFS", "NPS" (see campRules in calc.js), or null if it can't tell.
+const landCache = new Map();
+async function landAt(lat, lon) {
+  const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  if (!landCache.has(key)) {
+    const url = "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/identify?" + new URLSearchParams({
+      geometry: `${lon},${lat}`, geometryType: "esriGeometryPoint", sr: "4326", layers: "all:1", tolerance: "1",
+      mapExtent: `${lon - 1},${lat - 1},${lon + 1},${lat + 1}`, imageDisplay: "600,600,96", returnGeometry: "false", f: "json",
+    });
+    landCache.set(key, fetch(url).then((r) => r.json()).then((d) => d.results?.[0]?.attributes?.ADMIN_AGENCY_CODE || null).catch(() => null));
+  }
+  return landCache.get(key);
+}
+
+const CAMP_KIND = (c) => c.kind === "ground" ? "Campground" : c.flags.includes("p") ? "Tent spot" : c.flags.includes("b") ? "Backcountry site" : "Campsite";
+const mapLink = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
+const waterText = (w) => w ? `${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` (${esc(w.name)})` : ""} ${w.d < 0.1 ? "right there" : `${round1(w.d)} mi away`}${w.kind === "spring" && !w.drinkable ? ", filter it" : ""}` : "No mapped water within a mile";
+const round1 = (x) => Math.round(x * 10) / 10;
+
+async function fillCampBox(p, inputs) {
+  const box = $("camp-box");
+  if (!box) return;
+  const route = state.route;
+  const backpacking = inputs.nights > 0;
+  if (!route && !backpacking) return; // a day hike without a route: nothing to add
+
+  box.innerHTML = `<p class="muted small">Looking for ${backpacking ? "campsites and " : ""}water near your route…</p>`;
+  // The area to load: around the route, or 10 miles around the trailhead.
+  const pts = route || [{ lat: state.place.lat, lon: state.place.lon }];
+  const pad = route ? 0.05 : 0.15;
+  const lats = pts.map((x) => x.lat), lons = pts.map((x) => x.lon);
+  const places = await placesAround(Math.min(...lats) - pad, Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad);
+  if ($("camp-box") !== box) return; // the plan changed while loading
+  if (!places.length) {
+    box.innerHTML = `<h3>${backpacking ? "Where to camp" : "Water on the way"}</h3><p class="muted">Campsite and water data covers ${esc((placeIndex?.states || ["Arizona"]).join(", ").replace("AZ", "Arizona"))} for now. More places are coming.</p>`;
+    return;
+  }
+
+  let html = "";
+  if (backpacking && route) {
+    const slow = 1.15 * (1 + p.est.altitudeSlowdown / 100); // full pack and thin air, same as the rest of the plan
+    const { camps, pick, cutoff, reach } = campsAlongRoute({ points: route, places, start: p.start, sunset: p.first.sunset, pace: makePace(inputs), slow });
+    const shown = camps.filter((c) => c.status !== "late").slice(-8);
+    const late = camps.filter((c) => c.status === "late").length;
+    html += `<h3>Where to camp tonight</h3>
+      <p class="small muted">Campsites within about a third of a mile of your route, at your pace. "Easy" means you get there at least 45 minutes before sunset (${fmtTime(p.first.sunset)}) to set up, even if you get tired.</p>`;
+    // Where you'll be when it's time to stop, even if you get tired (helps most when no campsite is mapped).
+    if (reach && !reach.end) {
+      html += `<div class="camp reach"><b>By ${fmtTime(cutoff)} you'll be around mile ${reach.mile}</b> <span class="muted">(even if you get tired)</span>
+        <div class="small land" data-lat="${reach.lat}" data-lon="${reach.lon}" data-kind="spot"></div>
+        <div class="small"><a href="${mapLink(reach.lat, reach.lon)}" target="_blank" rel="noopener">See it on the map</a></div></div>`;
+    }
+    if (!camps.length) {
+      html += `<p>No campsites are mapped near this route. Dispersed camping may still be allowed, so check the land where you plan to stop (above).</p>`;
+    } else if (!shown.length) {
+      html += `<div class="alert warn">You can't reach any mapped campsite before dark at your pace. Start earlier (set up by ${fmtTime(cutoff)}) or plan a shorter first day.</div>`;
+    } else {
+      if (pick) html += campCard(pick, true);
+      html += `<ul class="camp-list">${shown.filter((c) => c !== pick).reverse().map((c) => `<li>${campCard(c, false)}</li>`).join("")}</ul>`;
+      if (late) html += `<p class="small muted">${late} more campsite${late > 1 ? "s" : ""} farther along that you'd reach after dark.</p>`;
+    }
+  } else if (backpacking) {
+    // No route: show the closest campsites to the trailhead, and ask for a route for the "before dark" part.
+    const near = places.filter((x) => x[2] === "camp" || x[2] === "ground")
+      .map((x) => ({ lat: x[0], lon: x[1], kind: x[2], name: x[3], flags: x[4], ridbId: x[5], d: milesBetween({ lat: x[0], lon: x[1] }, state.place) }))
+      .sort((a, b) => a.d - b.d).slice(0, 5);
+    html += `<h3>Campsites near the trailhead</h3>
+      <p class="small muted">Import your route (GPX) above to see which campsites you can reach before dark at your pace.</p>
+      <ul class="camp-list">${near.map((c) => `<li><div class="camp"><b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · ${round1(c.d)} mi away</span>
+        <div class="small land" data-lat="${c.lat}" data-lon="${c.lon}" data-kind="${c.kind}"></div>
+        <div class="small"><a href="${mapLink(c.lat, c.lon)}" target="_blank" rel="noopener">Map</a>${c.ridbId ? ` · <a href="https://www.recreation.gov/camping/campgrounds/${c.ridbId}" target="_blank" rel="noopener">Book on Recreation.gov</a>` : ""}</div></div></li>`).join("")}</ul>`;
+  }
+
+  if (route) {
+    const water = waterAlongRoute(route, places);
+    html += `<h3>Water on the way</h3>`;
+    html += water.length
+      ? `<ul class="water-list">${water.slice(0, 12).map((w) => `<li><span>Mile ${w.mile}</span> ${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` · ${esc(w.name)}` : ""}${w.offTrailMi >= 0.1 ? ` <span class="muted">(${w.offTrailMi} mi off trail)</span>` : ""}${w.kind === "spring" && !w.drinkable ? ` <span class="muted">· filter or treat</span>` : ""}</li>`).join("")}</ul>
+         <p class="small muted">Springs in the desert can be dry, especially in summer. Check recent trip reports, and carry enough to reach the next sure source.</p>`
+      : `<p class="muted">No mapped springs or taps within a quarter mile of this route. Carry all your water.</p>`;
+  }
+  html += `<p class="small muted">Campsites and water: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors and Recreation.gov. Land: Bureau of Land Management. Rules change (fire bans, closures), so check with the land office before you go.</p>`;
+  box.innerHTML = html;
+  track(backpacking ? "camps-shown" : "water-shown");
+
+  // Fill in "whose land is this?" for each campsite shown (a campground is always fine to camp at).
+  for (const el of box.querySelectorAll(".land")) {
+    if (el.dataset.kind === "ground") { el.textContent = "Campground: camping allowed (may need a reservation)."; continue; }
+    el.textContent = "Checking whose land this is…";
+    landAt(+el.dataset.lat, +el.dataset.lon).then((code) => {
+      const r = campRules(code);
+      el.textContent = `${r.label}: ${r.rule}`;
+      el.classList.add(r.ok === true ? "ok" : r.ok === false ? "no" : "check");
+    });
+  }
+}
+
+function campCard(c, isPick) {
+  const when = c.status === "easy" ? `Arrive ${fmtRange({ best: c.arriveBest, worst: c.arriveWorst })}` : `Only if you keep your pace: ${fmtTime(c.arriveBest)}`;
+  return `<div class="camp${isPick ? " pick" : ""}">
+    ${isPick ? `<div class="label">Best pick</div>` : ""}
+    <b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · mile ${c.mile}${c.offTrailMi >= 0.1 ? ` (${c.offTrailMi} mi off trail)` : ""}</span>
+    <span class="tag ${c.status}">${c.status === "easy" ? "Easy before dark" : "Tight"}</span>
+    <div class="small">${when}</div>
+    <div class="small">💧 ${waterText(c.water)}</div>
+    <div class="small land" data-lat="${c.lat}" data-lon="${c.lon}" data-kind="${c.kind}"></div>
+    <div class="small"><a href="${mapLink(c.lat, c.lon)}" target="_blank" rel="noopener">Map</a>${c.ridbId ? ` · <a href="https://www.recreation.gov/camping/campgrounds/${c.ridbId}" target="_blank" rel="noopener">Book on Recreation.gov</a>` : ""}</div>
+  </div>`;
 }
 
 const fmtRange = (r) => `${fmtTime(r.best)} – ${fmtTime(r.worst)}`;

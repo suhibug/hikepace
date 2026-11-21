@@ -2,13 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Trail Prep</title>
   <meta name="description" content="Free hike planner: time on trail, daylight, weather at the top, and how much water and food to bring. Works offline.">
   <meta name="theme-color" content="#2f5d50">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <!-- Installs like an app on iPhone (full screen, its own name and icon). iPhones need a PNG icon. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Trail Prep">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -121,7 +126,7 @@
   </main>
 
   <footer class="no-print">
-    Free and open source. Weather by <a href="https://open-meteo.com/">Open-Meteo</a>.
+    Free and open source. Weather by <a href="https://open-meteo.com/">Open-Meteo</a>. Campsites and water © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors and Recreation.gov.
     Estimates are a rough guide, not a safety guarantee.
   </footer>
 

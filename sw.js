@@ -1,7 +1,9 @@
 // Saves the app's files on the phone so Trail Prep opens without signal.
 // Online, it always loads the newest version; offline, it uses the saved copy.
-const CACHE = "trail-prep-v11";
-const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./analytics.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE = "trail-prep-v12";
+const FILES = ["./", "./index.html", "./style.css", "./app.js", "./calc.js", "./analytics.js", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./data/places/index.json"];
+// Campsite and water tiles (data/places/*.json) are saved the first time an area is looked at,
+// so a trip planned at home still shows its campsites on the trail with no signal.
 
 self.addEventListener("install", (event) => {
   // "reload" skips the browser's short-term cache so we save the newest files, not old ones.
