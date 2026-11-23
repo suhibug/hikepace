@@ -31,7 +31,7 @@ async function overpass(body) {
     try {
       const res = await fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "trail-prep-data/1.0" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "hikepace-data/1.0" },
         body: "data=" + encodeURIComponent(q),
       });
       if (res.ok) return await res.json();

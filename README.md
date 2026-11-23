@@ -1,6 +1,6 @@
 # hikepace
 
-(Formerly called Trail Prep. The GitHub repo and web address still say trail-prep for now.)
+(Formerly called Trail Prep. Live at https://suhibug.github.io/hikepace/)
 
 A free hike planner that tells you, before you leave:
 
@@ -111,7 +111,7 @@ node tools/build-places.mjs
 No installs needed beyond Python, which comes with macOS:
 
 ```bash
-cd trail-prep
+cd hikepace
 python3 -m http.server 8000
 ```
 

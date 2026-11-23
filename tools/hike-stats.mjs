@@ -1,7 +1,7 @@
 // Reads every GPX file in a folder and pulls out the numbers the survey would otherwise ask for:
 // start time, time at the top, finish time, distance, climbing, rest at the top, and more.
 //
-// Usage (from the trail-prep folder):
+// Usage (from the hikepace folder):
 //   node tools/hike-stats.mjs hike-data
 // It prints a summary and writes hike-data/hike-stats.csv (kept private: hike-data/ is never uploaded).
 
