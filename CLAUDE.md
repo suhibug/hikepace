@@ -1,4 +1,4 @@
-# Trail Prep: notes for Claude Code
+# hikepace: notes for Claude Code
 
 Free, offline-ready hike planner built by Suhitha (GitHub: suhibug). Plain HTML, CSS and JavaScript. No build step, no framework, no backend, no paid services.
 

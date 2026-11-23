@@ -1,4 +1,4 @@
-// Trail Prep: page logic. Weather comes from Open-Meteo (free, no account or key).
+// hikepace: page logic. Weather comes from Open-Meteo (free, no account or key).
 import {
   PACES, ENDINGS, END_TYPES, estimateHike, paceFactor, describePace, tempAtTop, estimateWater, estimateFood,
   gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
@@ -390,14 +390,14 @@ function showPace() {
     return;
   }
   if (!mine) {
-    $("pace-desc").textContent = "Enter a climb you already did below, and Trail Prep will use your real pace.";
+    $("pace-desc").textContent = "Enter a climb you already did below, and hikepace will use your real pace.";
     $("past-result").textContent = "";
     return;
   }
   const factor = paceFactor({ ref: mine });
   const pct = Math.round((factor - 1) * 100);
   const vsAverage = Math.abs(pct) < 5 ? "about average" : pct > 0 ? `${pct}% slower than average` : `${-pct}% faster than average`;
-  $("pace-desc").textContent = `Your pace: ${describePace(factor)} (${vsAverage}). On hikes much longer than this one, Trail Prep adds time for getting tired.`;
+  $("pace-desc").textContent = `Your pace: ${describePace(factor)} (${vsAverage}). On hikes much longer than this one, hikepace adds time for getting tired.`;
   $("past-result").textContent = `✓ Learned from your climb of ${mine.miles} mi and ${mine.gainFt.toLocaleString()} ft in ${formatDuration(mine.hours)}.`;
   $("past-miles").value ||= mine.miles;
   $("past-gain").value ||= mine.gainFt;
@@ -413,7 +413,7 @@ $("plan-form").addEventListener("submit", async (e) => {
   const inputs = readInputs();
   if (!inputs.upMiles || !inputs.date || !inputs.time) return showError("Add the miles to the top, the date and the start time.");
   if (inputs.ending !== "outback" && !inputs.backMiles) return showError(inputs.ending === "loop" ? "Add the miles from the top back to the start." : `Add the miles from the top to the ${endName(inputs)}.`);
-  if (inputs.pace === "custom" && !inputs.paceRef) return showError("Save your pace first (enter a past climb under \"Teach Trail Prep your pace\"), or pick another pace.");
+  if (inputs.pace === "custom" && !inputs.paceRef) return showError("Save your pace first (enter a past climb under \"Teach hikepace your pace\"), or pick another pace.");
   $("plan-btn").disabled = true;
   $("plan-btn").textContent = "Getting the forecast…";
   try {
@@ -752,7 +752,7 @@ function rideAlert(p) {
   if (level === "warn") return `<div class="alert warn">If you get tired, you could miss the last ${name} at ${fmtTime(last)} (you'd arrive ${fmtBetween(p.finish)}). Start earlier to be safe.</div>`;
   if (level === "ok") return "";
   if (name === "car pickup") return `<div class="alert warn">Tell your ride you'll arrive ${fmtBetween(p.finish)}.</div>`;
-  return `<div class="alert warn">Check when the last ${name} leaves and enter it above, so Trail Prep can warn you if you might miss it.</div>`;
+  return `<div class="alert warn">Check when the last ${name} leaves and enter it above, so hikepace can warn you if you might miss it.</div>`;
 }
 
 const w_cook = (p) => (p.w.cooking ? "drinking and cooking" : "drinking");

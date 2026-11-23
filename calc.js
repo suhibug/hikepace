@@ -1,4 +1,4 @@
-// Trail Prep: the math behind every estimate.
+// hikepace: the math behind every estimate.
 // Pure functions only (no page or network code), so they are easy to test.
 // Every number here is a rough guide, and the app says so on screen.
 
@@ -7,7 +7,7 @@
 // Naismith's rule: 3 mph on flat ground, plus 1 hour for every 2,000 ft of climbing.
 // We add about 10 minutes of rest per hour, and on the way back down about
 // 10 more minutes per 1,000 ft of descent (steep downhill is slower than people expect).
-// The factors come from real hikes in the Trail Prep survey (Nov 2026, 6 timed hikes):
+// The factors come from real hikes in the hikepace survey (Nov 2026, 6 timed hikes):
 // people who called themselves "fast" matched Naismith's rule, but "average" hikers took
 // about 1.3-1.4x as long once long breaks at the top are taken out. So "average" is 1.2 here
 // (1.2 x the 10-minute rests above ≈ 1.4x Naismith), and "relaxed" is a step slower than that.

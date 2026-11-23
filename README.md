@@ -1,4 +1,6 @@
-# Trail Prep
+# hikepace
+
+(Formerly called Trail Prep. The GitHub repo and web address still say trail-prep for now.)
 
 A free hike planner that tells you, before you leave:
 
@@ -11,7 +13,7 @@ A free hike planner that tells you, before you leave:
 - **Where to camp tonight** (backpacking): the campsites near your route that **you** can reach before dark at your own pace, the best pick (the farthest one with water close by), and whether camping is allowed on that land (BLM, National Forest, National Park, state, tribal or private)
 - **Water on the way**: springs and taps along your route, with the mile you reach each one
 
-**Import a route:** load a GPX file from AllTrails, Strava, Garmin, Coros, or most other hiking apps, and Trail Prep fills in the trailhead, distance, and elevation gain. The file is read on your device and never uploaded.
+**Import a route:** load a GPX file from AllTrails, Strava, Garmin, Coros, or most other hiking apps, and hikepace fills in the trailhead, distance, and elevation gain. The file is read on your device and never uploaded.
 
 It works **offline**: plan a trip while you have signal, tap **Save for offline**, and the plan opens on the trail with no signal.
 
@@ -30,13 +32,13 @@ I surveyed 14 hikers in October 2026 before writing any code. What they told me:
 
 The most annoying parts of planning were unpredictable weather, not knowing the weather at different points and times on the trail, and guessing how long a hike (or a group) will take. Several people had been caught off guard by cold, rain, darkness, or the wrong sleeping bag. When asked what one free tool should do, the top answers were trail weather and conditions, an "effort estimate" for water and calories, and water sources.
 
-**The second survey (November 2026)** collected 6 real hikes with start, top and finish times, water and food. It showed that one formula doesn't fit everyone: hikers who called themselves "fast" matched the standard rule, but "average" hikers took 1.5 to 2 times as long. So Trail Prep's paces were adjusted, and it can learn your own pace from a hike you recorded. The first survey's top backpacking problem, finding a flat, legal campsite, became the "Where to camp tonight" feature.
+**The second survey (November 2026)** collected 6 real hikes with start, top and finish times, water and food. It showed that one formula doesn't fit everyone: hikers who called themselves "fast" matched the standard rule, but "average" hikers took 1.5 to 2 times as long. So hikepace's paces were adjusted, and it can learn your own pace from a hike you recorded. The first survey's top backpacking problem, finding a flat, legal campsite, became the "Where to camp tonight" feature.
 
 ## How to use it
 
 1. Import a GPX route (it fills in everything below), or search for the trail, a landmark, or the nearest town.
 2. **The way up:** miles and feet of climbing to the top (or the turnaround point).
-3. **The way back:** same trail, a different trail back to the start, or down to a tram, shuttle, or car. For a tram or shuttle you can add the last departure time, and Trail Prep warns you if you might miss it.
+3. **The way back:** same trail, a different trail back to the start, or down to a tram, shuttle, or car. For a tram or shuttle you can add the last departure time, and hikepace warns you if you might miss it.
 4. Date, start time, trip type, and pace (hiking with others? pick the slowest person's pace).
 5. Tap **Plan my hike**, then **Save for offline** before you lose signal.
 6. Backpacking with an imported route? Scroll to **Where to camp tonight** for campsites you can reach before dark.
@@ -53,15 +55,15 @@ All numbers are rough guides, and the app says so.
   - **Relaxed:** about 2 mph on flat ground, plus 1 hour for every 1,330 ft of climbing
   - **Average:** about 2.5 mph on flat ground, plus 1 hour for every 1,670 ft of climbing (set from the November 2026 survey's real hikes)
   - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
-  - **Your own pace:** learned from the way up of a climb you already did. For hikes much longer than that climb, Trail Prep scales the time the way endurance runners do (Riegel's formula) and adds a "getting tired" case.
+  - **Your own pace:** learned from the way up of a climb you already did. For hikes much longer than that climb, hikepace scales the time the way endurance runners do (Riegel's formula) and adds a "getting tired" case.
 - **Altitude:** above about 6,000 ft, thinner air slows most people down, so times get about 6% longer per 1,000 ft (measured at the middle of the climb). The trailhead elevation is filled in for you and can be corrected.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
 - **Water:** to drink while hiking, 0.35 to 1.1 liters per hour depending on the hottest "feels like" temperature (a bit more for big climbs). Backpacking adds camp water: 2 to 3 liters per night with cooking, 1 to 1.5 without.
 - **Food (what to pack):** trail snacks of 200 to 300 calories per hour of hiking, plus dinner (600 to 900) and breakfast (400 to 600) for each night; 10% more in the cold. Backpacking food is about 1,600 to 2,000 calories per pound.
 - **Pack list:** grouped into essentials, clothing, traction and safety, and camp. It looks at the forecast and the last 3 days of snow, so it suggests things like microspikes, gaiters, or checking the avalanche forecast when there's recent snow up high.
 
-- **Where to camp:** Trail Prep walks your route point by point at your pace (steep parts count as slower, a full pack adds 15%), and marks each campsite within about a third of a mile of the trail as "easy" (you arrive at least 45 minutes before sunset to set up, even if you get tired), "tight" (only if you keep your pace), or after dark. It also says where you'll be by set-up time, in case no campsite is mapped there.
-- **Legal camping:** a live lookup on the Bureau of Land Management's free land map tells who manages the land at each campsite, and Trail Prep shows what that land usually allows. Rules change (fire bans, closures), so always check with the land office.
+- **Where to camp:** hikepace walks your route point by point at your pace (steep parts count as slower, a full pack adds 15%), and marks each campsite within about a third of a mile of the trail as "easy" (you arrive at least 45 minutes before sunset to set up, even if you get tired), "tight" (only if you keep your pace), or after dark. It also says where you'll be by set-up time, in case no campsite is mapped there.
+- **Legal camping:** a live lookup on the Bureau of Land Management's free land map tells who manages the land at each campsite, and hikepace shows what that land usually allows. Rules change (fire bans, closures), so always check with the land office.
 
 The formulas live in `calc.js` so they're easy to read and change.
 
@@ -88,7 +90,7 @@ Campsite and water data covers **Arizona** for now. To add a state, run the two 
 | `app.js` | Page logic: place search, GPX import, forecast, building the plan, "where to camp", saved trips |
 | `calc.js` | All the math, as plain functions with no page code: time, pace, water, food, daylight, gear, warnings, campsites along a route |
 | `sw.js` | Service worker: saves the app (and the campsite data you've looked at) on the phone so it works with no signal |
-| `manifest.webmanifest`, `icon*.png`, `icon.svg` | Lets phones install Trail Prep to the home screen with its own icon |
+| `manifest.webmanifest`, `icon*.png`, `icon.svg` | Lets phones install hikepace to the home screen with its own icon |
 | `analytics.js` | Anonymous visit counts (no names, no trails or places) |
 | `data/places/` | Campsites, springs, water and trailheads, split into small half-degree squares so a phone only downloads the area it needs. Made by `tools/build-places.mjs` |
 | `tools/fetch-open-data.mjs` | Downloads the free campsite, spring, water and trailhead data (and Recreation.gov campgrounds) for a state |

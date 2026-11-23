@@ -1,6 +1,6 @@
 {
-  "name": "Trail Prep",
-  "short_name": "Trail Prep",
+  "name": "hikepace",
+  "short_name": "hikepace",
   "description": "Free hike planner: your own pace, daylight, weather, water, food, and campsites you can reach before dark. Works offline.",
   "start_url": "./",
   "scope": "./",

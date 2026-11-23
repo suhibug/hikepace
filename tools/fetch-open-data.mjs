@@ -1,4 +1,4 @@
-// Downloads the free map data Trail Prep uses for "where can I camp?" and saves it in hike-data/open-data/
+// Downloads the free map data hikepace uses for "where can I camp?" and saves it in hike-data/open-data/
 // (that folder is not uploaded to GitHub; tools/build-places.mjs turns it into the small files the app loads).
 //
 // Sources (all free):
