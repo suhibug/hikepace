@@ -5,7 +5,7 @@ Free, offline-ready hike planner built by Suhitha (GitHub: suhibug). Plain HTML,
 ## Files
 - `index.html`: the page and form
 - `app.js`: page logic: place search, trail autofill, forecast fetch, rendering (sun bar, climb chart, camps), settings sheet, saved trips (localStorage)
-- `trail.js`: searched trail → route points with elevation (Nominatim `polygon_geojson` + `dedupe=0` for the pieces, joined; Open-Meteo elevation, smoothed). Overpass helper also lives here.
+- `trail.js`: `waysUp(peak)` (Photon reverse for trail names near the top → each trail's far end, plus OSRM car-nearest road start if ≤0.4 mi extra; Nominatim parking/trailhead backup; OSRM foot table + route) and `trailRoute(trail)`; searched trail → route points with elevation (Nominatim `polygon_geojson` + `dedupe=0` for the pieces, joined; Open-Meteo elevation, smoothed). Overpass helper also lives here.
 - `places.js`: campsites/water near a route anywhere: `data/places` tiles first, else live Overpass, else Nominatim category search. BLM land lookup (US only).
 - `units.js`: metric/imperial display. Internals stay miles/feet/°F; convert only at input/output.
 - `calc.js`: all estimate math as pure functions (time, water, food, daylight, gear, warnings)
@@ -13,6 +13,11 @@ Free, offline-ready hike planner built by Suhitha (GitHub: suhibug). Plain HTML,
 - `manifest.webmanifest`, `icon.svg`: lets phones install it to the home screen
 - `data/places/`: campsite, spring, water and trailhead tiles (half-degree squares) loaded by the "where to camp" feature. Built by `tools/fetch-open-data.mjs` (OpenStreetMap + Recreation.gov) then `tools/build-places.mjs`. Arizona tiles; other places go live through places.js.
 - `tools/hike-stats.mjs`: reads every GPX in `hike-data/` and writes `hike-data/hike-stats.csv` (start, top, finish times, distance, climbing, rest at top). Run: `node tools/hike-stats.mjs hike-data`. Used to check the estimates against real hikes from the survey.
+
+## UI
+- Screens (`.screen`, one question each) switched by `go(id)` in app.js; first run (`hikepace.onboarded`) asks for a past hike and saves the pace (`trailprep.myPace`, choice in `hikepace.paceChoice`). Plan results use tabs, not one long page.
+- Test the full flow with a Playwright script (iPhone 13 profile, `context.route` serving the folder), light and dark.
+- Open-Meteo elevation counts each point: keep ≤120 points per route.
 
 ## Rules
 - Keep it free: only free, keyless APIs in the app (Open-Meteo, OpenStreetMap, the BLM land map). No accounts, no API keys in the app, no paid hosting. The one key (Recreation.gov RIDB) is used only by `tools/fetch-open-data.mjs` on Suhitha's computer and lives in `hike-data/.keys` (gitignored).

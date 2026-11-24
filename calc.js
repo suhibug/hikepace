@@ -60,8 +60,14 @@ export function sampleHike(factor) {
 
 // Effort of the climb we learned a pace from, with its own altitude taken out
 // (if we know it), so a climb done high up isn't mistaken for a slow hiker.
+// A past hike can be just the way up, or the whole hike there and back (then descentFt is the way down).
 function refEffort(ref) {
-  return effortHours(ref.miles, ref.gainFt) * altitudeFactor(ref.elevFt, ref.gainFt);
+  return effortHours(ref.miles, ref.gainFt, ref.descentFt || 0) * altitudeFactor(ref.elevFt, ref.gainFt);
+}
+
+// Which ready-made pace a factor is closest to, for showing a learned pace as a word and a picture.
+export function paceKind(factor) {
+  return factor <= 1.0 ? "fast" : factor <= 1.35 ? "average" : "relaxed";
 }
 
 // Turns effort hours into a real time range for this hiker:

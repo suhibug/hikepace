@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>hikepace</title>
-  <meta name="description" content="Free hike planner for anywhere in the world: type a trail and get your time at your own pace, daylight, weather at the top, water, food, and campsites you can reach before dark. Works offline.">
-  <meta name="theme-color" content="#1f4d3f">
+  <meta name="description" content="Free hike planner for anywhere in the world: type a trail or a peak and get your time at your own pace, daylight, weather at the top, water, food, and campsites you can reach before dark. Works offline.">
+  <meta name="theme-color" content="#173f31">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <!-- Installs like an app on iPhone (full screen, its own name and icon). iPhones need a PNG icon. -->
@@ -14,151 +14,185 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="hikepace">
   <link rel="apple-touch-icon" href="icon-180.png">
+  <!-- Fonts: Fredoka (round, friendly headings) and Nunito (easy-to-read text). Offline it falls back to the phone's font. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- App bar: stays at the top like a phone app. Units and settings on the right. -->
-  <header class="appbar">
-    <div class="brand">
-      <img src="icon.svg" alt="" width="34" height="34">
-      <div><h1>hikepace</h1><p>your hike, at your pace</p></div>
+  <!-- Splash: the sun comes up behind the mountains and a dotted trail draws itself to the top. -->
+  <div id="splash" class="splash" aria-hidden="true">
+    <svg class="scene" viewBox="0 0 400 300" preserveAspectRatio="xMidYMax slice">
+      <defs>
+        <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#2b3a67"/><stop offset=".55" stop-color="#f08a6c"/><stop offset="1" stop-color="#ffd59e"/></linearGradient>
+      </defs>
+      <rect width="400" height="300" fill="url(#sky)"/>
+      <circle class="sun" cx="250" cy="170" r="38" fill="#ffd36e"/>
+      <path class="m3" d="M0 210 L70 150 L120 185 L190 120 L250 175 L310 135 L400 190 V300 H0Z" fill="#6f5b8f"/>
+      <path class="m2" d="M0 240 L90 170 L150 215 L230 140 L300 205 L360 175 L400 200 V300 H0Z" fill="#3d5f6e"/>
+      <path class="m1" d="M0 300 V255 L60 230 L140 250 L210 205 L280 245 L340 225 L400 245 V300Z" fill="#173f31"/>
+      <path class="trail" d="M120 300 C140 280 170 270 175 250 S200 230 210 207" fill="none" stroke="#ffe9c7" stroke-width="3" stroke-dasharray="2 7" stroke-linecap="round"/>
+      <g class="flag" transform="translate(210 207)"><line x1="0" y1="0" x2="0" y2="-22" stroke="#ffe9c7" stroke-width="2.5"/><path d="M0 -22 L16 -17 L0 -12Z" fill="#ff7a3d"/></g>
+    </svg>
+    <div class="splash-text">
+      <h1>hikepace</h1>
+      <p>your hike, at your pace</p>
+      <button type="button" id="splash-go" class="btn sun" hidden>Let's go</button>
     </div>
-    <div class="appbar-right">
-      <button type="button" id="units-btn" class="chip-btn" aria-label="Switch between miles and kilometers">mi · ft</button>
-      <button type="button" id="settings-btn" class="icon-btn" aria-label="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-      </button>
-    </div>
-  </header>
+  </div>
 
-  <main>
-    <div id="offline-note" class="alert warn" hidden>You're offline. Your saved trips below still work.</div>
+  <div id="app" hidden>
+    <div id="offline-note" class="offline" hidden>You're offline. Saved trips still work.</div>
 
-    <form id="plan-form" novalidate>
-      <!-- Step 1: where. Typing a trail name fills in the distance and climb by itself. -->
-      <section class="panel hero">
-        <p class="step-num">1 · Where</p>
-        <h2>Where are you hiking? <span class="wave" aria-hidden="true">🏔️</span></h2>
-        <label for="place" class="sr-only">Trail, peak, landmark, town, or coordinates</label>
-        <div class="search">
-          <input id="place" placeholder="Type a trail, e.g. Echo Canyon Trail" autocomplete="off" enterkeyhint="search">
-          <button type="button" id="place-search" aria-label="Search">Search</button>
-        </div>
-        <div class="search-extra">
-          <button type="button" id="place-gps" class="ghost">📍 Near me</button>
-          <label for="gpx" class="ghost">📂 Use a GPX file</label>
-          <input type="file" id="gpx" accept=".gpx,application/gpx+xml" hidden>
-          <a href="#gpx-help" id="gpx-help-link" class="small">What's GPX?</a>
-        </div>
-        <div id="gpx-help" class="small gpx-help" hidden></div>
-        <ul id="place-results" class="place-results"></ul>
-        <p id="place-chosen" class="chosen"></p>
-        <div id="route-card" class="route-card" hidden></div>
-        <div id="gpx-status" class="small"></div>
-      </section>
-
-      <!-- Step 2: the trail. Filled in for you when we find the trail; change anything. -->
-      <section class="panel">
-        <p class="step-num">2 · The trail</p>
-        <h2>The way up</h2>
-        <div class="grid">
-          <div><label for="up-miles"><span class="u-dist">Miles</span> to the top</label><input id="up-miles" type="number" min="0.1" step="any" inputmode="decimal" placeholder="e.g. 4" required>
-            <p class="small muted hint-under">Or to the turnaround point if there's no peak.</p></div>
-          <div><label for="up-gain">Climb to the top (<span class="u-elev">feet</span>)</label><input id="up-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 1500"></div>
-          <div><label for="trailhead-elev">Trailhead elevation (<span class="u-elev">feet</span>)</label><input id="trailhead-elev" type="number" min="-300" step="any" inputmode="decimal" placeholder="Filled in when you pick a place">
-            <p id="elev-note" class="small muted hint-under">High up, thinner air slows most people down, so hikepace adds time.</p></div>
-        </div>
-
-        <h2>The way back</h2>
-        <div class="grid">
-          <div><label for="ending">How do you get back?</label>
-            <select id="ending">
-              <option value="outback">Same trail back</option>
-              <option value="loop">Different trail back (loop)</option>
-              <option value="oneway">To a tram, shuttle or car</option>
-            </select></div>
-          <div id="end-type-wrap" hidden><label for="end-type">What's at the end?</label>
-            <select id="end-type">
-              <option value="tram">Tram or gondola</option>
-              <option value="shuttle">Shuttle or bus</option>
-              <option value="car">A car picking me up</option>
-            </select></div>
-          <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 5.5"></div>
-          <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (<span class="u-elev">feet</span>, optional)</label><input id="back-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div>
-          <div id="last-time-wrap" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time">
-            <p class="small muted hint-under">Check their website. hikepace warns you if you might miss it.</p></div>
-        </div>
-        <p id="totals" class="totals"></p>
-      </section>
-
-      <!-- Step 3: when and how fast. -->
-      <section class="panel">
-        <p class="step-num">3 · When &amp; how fast</p>
-        <div class="grid">
-          <div><label for="date">Date</label><input id="date" type="date" required></div>
-          <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
-          <div><label for="nights">Trip type</label>
-            <select id="nights">
-              <option value="0">Day hike</option>
-              <option value="1">Backpacking, 1 night</option>
-              <option value="2">Backpacking, 2 nights</option>
-              <option value="3">Backpacking, 3 nights</option>
-            </select>
-            <label id="cooking-wrap" class="check" hidden><input type="checkbox" id="cooking" checked> I'll cook at camp (stove)</label></div>
-        </div>
-
-        <h2>Your pace</h2>
-        <p class="small muted">Tap the one that sounds like you. Hiking with others? Pick the slowest person's pace.</p>
-        <input type="hidden" id="pace" value="average">
-        <div id="pace-cards" class="pace-cards" role="radiogroup" aria-label="Your pace"></div>
-        <p id="pace-desc" class="small muted pace-desc"></p>
-        <div id="my-pace" class="my-pace" hidden>
-          <b>Teach hikepace your pace</b>
-          <p class="small muted">Use the way up of a hike you already did. Long breaks at the top don't count. If you recorded a hike on a watch or app, use its GPX file above and it reads the times for you.</p>
-          <div class="grid">
-            <div><label for="past-miles"><span class="u-dist">Miles</span> to the top</label><input id="past-miles" type="number" min="0.1" step="any" inputmode="decimal" placeholder="e.g. 3"></div>
-            <div><label for="past-gain">Climb to the top (<span class="u-elev">feet</span>)</label><input id="past-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 2600"></div>
-            <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="any" inputmode="decimal" placeholder="e.g. 1.5"></div>
-          </div>
-          <button type="button" id="past-save" class="secondary">Save my pace</button>
-          <p id="past-result" class="small"></p>
-        </div>
-      </section>
-
-      <button id="plan-btn" type="submit" class="primary">Plan my hike 🥾</button>
-      <p class="privacy">🔒 Your trips stay on this device. Nothing you type is uploaded, and we only count visits anonymously.</p>
-    </form>
-
-    <section id="results" class="panel results" hidden aria-live="polite"></section>
-
-    <section id="saved" class="panel no-print" hidden>
-      <h2>Saved trips <span class="small muted">(work offline)</span></h2>
-      <ul id="saved-list" class="saved-list"></ul>
+    <!-- ============ First time: get to know your pace ============ -->
+    <section class="screen" id="s-welcome" data-flow="intro">
+      <div class="hero-art" aria-hidden="true">🥾</div>
+      <h2 class="big-h">Hey hiker!</h2>
+      <p class="lead">hikepace plans your hike at <b>your</b> pace: how long it takes, when to start, water, food, and where to camp before dark.</p>
+      <p class="lead">First, one quick question so it knows how you hike.</p>
+      <div class="bottom"><button type="button" class="btn sun" data-go="s-past">Sounds good</button></div>
     </section>
-  </main>
 
-  <!-- Settings: units, what each pace means, your saved pace. -->
-  <dialog id="settings" class="sheet">
-    <div class="sheet-head"><h2>Settings</h2><button type="button" class="icon-btn dark" data-close aria-label="Close">✕</button></div>
-    <h3>Units</h3>
-    <div class="seg" role="radiogroup" aria-label="Units">
-      <button type="button" data-units="metric">Kilometers · meters · °C</button>
-      <button type="button" data-units="imperial">Miles · feet · °F</button>
-    </div>
-    <h3>What the paces mean</h3>
-    <p class="small muted">Based on Naismith's hiking rule, checked against 8,648 GPS-recorded hikes and real hikes from our hiker survey. Times include short rests.</p>
-    <div id="pace-explain"></div>
-    <h3>Your own pace</h3>
-    <p id="my-pace-status" class="small"></p>
-    <h3>Your data</h3>
-    <p class="small muted">Trips and your pace are saved only on this phone.</p>
-    <button type="button" id="clear-data" class="secondary">Delete my saved trips and pace</button>
-  </dialog>
+    <section class="screen" id="s-past" data-flow="intro">
+      <div class="top"><button type="button" class="back" data-go="s-welcome" aria-label="Back">‹</button><div class="dots"><i class="on"></i><i></i><i></i></div></div>
+      <h2 class="big-h">What's a hike you've done?</h2>
+      <p class="lead">Type the trail or the peak. I'll measure it for you.</p>
+      <div id="past-search"></div>
+      <div class="bottom"><button type="button" class="btn ghost" data-go="s-past-preset">I'm new, or I don't remember</button></div>
+    </section>
 
-  <footer class="no-print">
-    Free and open source. Weather and elevation by <a href="https://open-meteo.com/">Open-Meteo</a>. Trails, campsites and water © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors. US campgrounds from Recreation.gov.
-    Estimates are a rough guide, not a safety guarantee.
-  </footer>
+    <section class="screen" id="s-past-time" data-flow="intro">
+      <div class="top"><button type="button" class="back" data-go="s-past" aria-label="Back">‹</button><div class="dots"><i class="done"></i><i class="on"></i><i></i></div></div>
+      <h2 class="big-h">How long did it take you?</h2>
+      <div id="past-card" class="trail-mini"></div>
+      <div class="seg" id="past-mode" role="radiogroup" aria-label="What the time covers">
+        <button type="button" data-mode="whole" aria-pressed="true">The whole hike</button>
+        <button type="button" data-mode="top" aria-pressed="false">Just to the top</button>
+      </div>
+      <div class="stepper" aria-label="Time">
+        <button type="button" class="step-btn" data-step="-15" aria-label="15 minutes less">−</button>
+        <output id="past-time-out">2 h 00 min</output>
+        <button type="button" class="step-btn" data-step="15" aria-label="15 minutes more">+</button>
+      </div>
+      <p class="hint center">Tap + and − (15 minutes each). Breaks count, a guess is fine.</p>
+      <div class="bottom"><button type="button" class="btn sun" id="past-save">That's my pace</button></div>
+    </section>
+
+    <section class="screen" id="s-past-preset" data-flow="intro">
+      <div class="top"><button type="button" class="back" data-go="s-past" aria-label="Back">‹</button><div class="dots"><i class="done"></i><i class="on"></i><i></i></div></div>
+      <h2 class="big-h">Which sounds like you?</h2>
+      <div id="preset-cards" class="preset-cards"></div>
+      <p class="hint">You can teach it your real pace any time under <b>You</b>.</p>
+    </section>
+
+    <section class="screen" id="s-you-are" data-flow="intro">
+      <div class="top"><div class="dots"><i class="done"></i><i class="done"></i><i class="on"></i></div></div>
+      <div id="you-are"></div>
+      <div class="bottom"><button type="button" class="btn sun" id="start-planning">Plan my next hike</button></div>
+    </section>
+
+    <!-- ============ Plan a hike: one step per screen ============ -->
+    <section class="screen" id="s-where" data-tab="plan">
+      <div class="top"><div class="dots"><i class="on"></i><i></i><i></i></div><button type="button" id="units-btn" class="chip-btn" aria-label="Switch between miles and kilometers">mi</button></div>
+      <h2 class="big-h">Where to?</h2>
+      <p class="lead">A trail, a peak, a waterfall… anywhere in the world.</p>
+      <div id="plan-search"></div>
+      <div class="or-row">
+        <button type="button" id="place-gps" class="pill">📍 Near me</button>
+        <label for="gpx" class="pill">📂 GPX file</label>
+        <input type="file" id="gpx" accept=".gpx,application/gpx+xml" hidden>
+      </div>
+      <div id="gpx-status" class="hint"></div>
+    </section>
+
+    <section class="screen" id="s-trail" data-tab="plan">
+      <div class="top"><button type="button" class="back" data-go="s-where" aria-label="Back">‹</button><div class="dots"><i class="done"></i><i class="on"></i><i></i></div></div>
+      <div id="trail-hero" class="trail-hero"></div>
+      <div id="ways" class="ways"></div>
+      <h3 class="label-h">How do you get back?</h3>
+      <div class="seg three" id="ending-seg">
+        <button type="button" data-ending="outback">Same way</button>
+        <button type="button" data-ending="loop">Loop</button>
+        <button type="button" data-ending="oneway">Ends elsewhere</button>
+      </div>
+      <select id="ending" hidden><option value="outback">Same trail back</option><option value="loop">Loop</option><option value="oneway">Ends somewhere else</option></select>
+      <div id="end-type-wrap" class="field" hidden><label for="end-type">What's at the end?</label>
+        <select id="end-type"><option value="tram">Tram or gondola</option><option value="shuttle">Shuttle or bus</option><option value="car">A car picking me up</option></select></div>
+      <div id="last-time-wrap" class="field" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time"></div>
+      <details class="fix" id="fix-numbers">
+        <summary>✏️ Fix the numbers</summary>
+        <div class="grid">
+          <div class="field"><label for="up-miles"><span class="u-dist">Miles</span> to the top</label><input id="up-miles" type="number" min="0.1" step="any" inputmode="decimal"></div>
+          <div class="field"><label for="up-gain">Climb to the top (<span class="u-elev">feet</span>)</label><input id="up-gain" type="number" min="0" step="any" inputmode="decimal"></div>
+          <div class="field"><label for="trailhead-elev">Trailhead elevation (<span class="u-elev">feet</span>)</label><input id="trailhead-elev" type="number" step="any" inputmode="decimal"><p id="elev-note" class="hint"></p></div>
+          <div class="field" id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="any" inputmode="decimal"></div>
+          <div class="field" id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (<span class="u-elev">feet</span>)</label><input id="back-gain" type="number" min="0" step="any" inputmode="decimal"></div>
+        </div>
+      </details>
+      <p id="totals" class="totals"></p>
+      <div class="bottom"><button type="button" class="btn sun" id="to-when">Next</button></div>
+    </section>
+
+    <section class="screen" id="s-when" data-tab="plan">
+      <div class="top"><button type="button" class="back" data-go="s-trail" aria-label="Back">‹</button><div class="dots"><i class="done"></i><i class="done"></i><i class="on"></i></div></div>
+      <h2 class="big-h">When are you going?</h2>
+      <div class="chips" id="date-chips"></div>
+      <input id="date" type="date" class="inline-input" hidden>
+      <h3 class="label-h">Start time</h3>
+      <div class="chips" id="time-chips"></div>
+      <input id="time" type="time" value="07:00" class="inline-input" hidden>
+      <h3 class="label-h">Trip</h3>
+      <div class="tiles" id="nights-tiles">
+        <button type="button" data-nights="0"><span>☀️</span>Day hike</button>
+        <button type="button" data-nights="1"><span>⛺</span>1 night</button>
+        <button type="button" data-nights="2"><span>🏕️</span>2 nights</button>
+        <button type="button" data-nights="3"><span>🌌</span>3 nights</button>
+      </div>
+      <input type="hidden" id="nights" value="0">
+      <label id="cooking-wrap" class="check" hidden><input type="checkbox" id="cooking" checked> I'll cook at camp</label>
+      <button type="button" id="pace-chip" class="pace-chip"></button>
+      <input type="hidden" id="pace" value="average">
+      <div class="bottom"><button type="button" class="btn sun" id="plan-btn">Plan my hike 🥾</button></div>
+    </section>
+
+    <section class="screen plan-screen" id="s-plan" data-tab="plan">
+      <div class="top"><button type="button" class="back" data-go="s-when" aria-label="Back">‹</button><span class="top-title">Your plan</span><button type="button" class="chip-btn ghosty" id="new-plan">New</button></div>
+      <div id="results" aria-live="polite"></div>
+    </section>
+
+    <!-- ============ Trips and You ============ -->
+    <section class="screen" id="s-trips" data-tab="trips">
+      <h2 class="big-h">Your trips</h2>
+      <p class="lead">Saved plans open with no signal.</p>
+      <ul id="saved-list" class="saved-list"></ul>
+      <p id="no-trips" class="empty">No saved trips yet. Plan a hike and tap <b>Save</b>. 🗺️</p>
+    </section>
+
+    <section class="screen" id="s-me" data-tab="me">
+      <h2 class="big-h">You</h2>
+      <div id="me-pace"></div>
+      <button type="button" class="btn ghost" id="relearn">Teach it with another hike</button>
+      <h3 class="label-h">Units</h3>
+      <div class="seg" role="radiogroup" aria-label="Units">
+        <button type="button" data-units="metric">km · m · °C</button>
+        <button type="button" data-units="imperial">mi · ft · °F</button>
+      </div>
+      <h3 class="label-h">What the paces mean</h3>
+      <p class="hint">Naismith's hiking rule, checked against 8,648 GPS-recorded hikes and our hiker survey. Times include short rests.</p>
+      <div id="pace-explain"></div>
+      <h3 class="label-h">Your data</h3>
+      <p class="hint">Trips and your pace stay on this phone. Nothing you type is uploaded.</p>
+      <button type="button" id="clear-data" class="btn ghost danger">Delete my trips and pace</button>
+      <p class="credits">Free and open source. Weather and elevation: Open-Meteo. Trails, campsites, water: © OpenStreetMap contributors. Walking routes: OSRM. US campgrounds: Recreation.gov. Estimates are a rough guide, not a safety guarantee.</p>
+    </section>
+
+    <nav class="tabbar" id="tabbar" hidden>
+      <button type="button" data-tab="plan" aria-current="page"><svg viewBox="0 0 24 24"><path d="M3 20l6-12 4 7 3-4 5 9z"/></svg>Plan</button>
+      <button type="button" data-tab="trips"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg>Trips</button>
+      <button type="button" data-tab="me"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg>You</button>
+    </nav>
+  </div>
 
   <script type="module" src="app.js"></script>
   <!-- Anonymous visit counts (no names, no trails or places): https://www.goatcounter.com and Google Analytics 4 -->

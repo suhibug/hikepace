@@ -13,11 +13,15 @@ A free hike planner for **anywhere in the world**. Type a trail's name, and it m
 - **Where to camp tonight** (backpacking): the campsites near your route that **you** can reach before dark at your own pace, the best pick (the farthest one with water close by), and whether camping is allowed on that land (BLM, National Forest, National Park, state, tribal or private)
 - **Water on the way**: springs and taps along your route, with the mile you reach each one
 
-**Type a trail, get the numbers:** search "Echo Canyon Trail" or "Snowdon Ranger Path" and hikepace finds the trail's path on OpenStreetMap, joins its pieces, and measures it with free elevation data. You can still change any number.
+**Type a trail or a peak, get the numbers:** search "Camelback Mountain" and hikepace finds the trails that reach the top, starts each one where you park, and measures the walk (distance, climb, trailhead elevation) with a free walking-route service and free elevation data. It offers the best ways up ("via Cholla Trail, 1.4 mi"). Search a trail by name and it measures that trail. Suggestions appear as you type, nearby places first.
+
+**It learns your pace once:** the first time you open it, it asks for one hike you've done and how long it took, then uses your real pace for every plan. No pace? Pick Relaxed, Average or Fast, each explained with an example.
+
+**One question per screen:** Where → your trail → when → your plan. The plan has tabs (your day, weather, pack list, camp and water) instead of one long page, and a tab bar for Plan, Trips and You.
 
 **Kilometers or miles:** tap the unit button at the top (or Settings). People outside the US get kilometers, meters and °C by default.
 
-**Fun to use:** tap-to-pick pace cards, a sun bar with a little boot walking from your start to your finish, a climb chart you can slide your finger along to see when you'll reach each point, water and tent pins on the chart, a pack list you tick off, and a small celebration when your plan is ready. People who turn off motion on their phone don't get the animations.
+**Fun to use:** a sunrise splash screen, a pace meter, a sun bar with a little boot walking from your start to your finish, a climb chart you can slide your finger along to see when you'll reach each point, water and tent pins on the chart, a pack list you tick off, and a small celebration when your plan is ready. People who turn off motion on their phone don't get the animations.
 
 **Import a route:** load a GPX file from AllTrails, Strava, Garmin, Coros, or most other hiking apps, and hikepace fills in the trailhead, distance, and elevation gain. The file is read on your device and never uploaded.
 
@@ -42,12 +46,11 @@ The most annoying parts of planning were unpredictable weather, not knowing the 
 
 ## How to use it
 
-1. Import a GPX route (it fills in everything below), or search for the trail, a landmark, or the nearest town.
-2. **The way up:** miles and feet of climbing to the top (or the turnaround point).
-3. **The way back:** same trail, a different trail back to the start, or down to a tram, shuttle, or car. For a tram or shuttle you can add the last departure time, and hikepace warns you if you might miss it.
-4. Date, start time, trip type, and pace (hiking with others? pick the slowest person's pace).
-5. Tap **Plan my hike**, then **Save for offline** before you lose signal.
-6. Backpacking with an imported route? Scroll to **Where to camp tonight** for campsites you can reach before dark.
+1. First time only: tell it one hike you've done and how long it took (or pick a pace).
+2. **Where to?** Type a trail or a peak and tap it. It measures the way up for you; pick another way up if there's more than one.
+3. **Your trail:** check the numbers (✏️ Fix the numbers if your guide says otherwise) and how you get back: same way, loop, or ends at a tram, shuttle or car.
+4. **When:** tap a day, a start time (or Sunrise) and day hike or nights.
+5. **Your plan:** swipe through the tabs, tick off the pack list, then **Save** before you lose signal.
 
 No GPX file? Free options: draw the trail on CalTopo and export it, or export a hike you recorded from your watch's app.
 
@@ -85,7 +88,9 @@ All free:
 | Data | Source |
 |---|---|
 | Weather, sunrise and sunset, elevation | [Open-Meteo](https://open-meteo.com/) |
-| Place and trail search, and each trail's path | [OpenStreetMap](https://www.openstreetmap.org/) (Nominatim) |
+| Search with suggestions (nearby first) | [Photon](https://photon.komoot.io/) by komoot, from OpenStreetMap |
+| Each trail's path, parking lots and trailheads | [OpenStreetMap](https://www.openstreetmap.org/) (Nominatim) |
+| Walking distance from the car to the top | [OSRM](https://routing.openstreetmap.de/) on routing.openstreetmap.de (FOSSGIS) |
 | Height along a trail | [Open-Meteo elevation](https://open-meteo.com/en/docs/elevation-api) (Copernicus 90 m map) |
 | Campsites, tent spots, springs, drinking water, trailheads | © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL license |
 | Federal campgrounds (with booking links) | [Recreation.gov RIDB](https://ridb.recreation.gov/) |
@@ -99,8 +104,8 @@ Campsites and water work **everywhere**: Arizona uses ready-made files (with US 
 |---|---|
 | `index.html` | The page: the plan form and the empty results area |
 | `style.css` | How it looks, including the phone layout (app-like on the home screen) and dark mode |
-| `app.js` | Page logic: place search, GPX import, forecast, building the plan, the sun bar and climb chart, "where to camp", settings, saved trips |
-| `trail.js` | Turns a searched trail into a full route: gets its pieces from OpenStreetMap, joins them, and adds heights from Open-Meteo |
+| `app.js` | The screens and what they do: first-time pace questions, search with suggestions, measuring the trail, when, the plan with tabs (sun bar, climb chart, weather, pack list, camp), Trips and You |
+| `trail.js` | Measures trails: a searched trail's pieces joined into one path, or the best ways up a peak (trails near the top, starting where you park, walked with OSRM). Adds heights from Open-Meteo |
 | `places.js` | Finds campsites, springs and water near a trail anywhere (ready-made files first, then live from OpenStreetMap), and the US land-manager lookup |
 | `units.js` | Miles/feet/°F or kilometers/meters/°C. The math always works in miles and feet; this only changes what people see and type |
 | `calc.js` | All the math, as plain functions with no page code: time, pace, water, food, daylight, gear, warnings, campsites along a route |
