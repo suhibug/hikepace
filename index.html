@@ -4,129 +4,159 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>hikepace</title>
-  <meta name="description" content="Free hike planner: time on trail, daylight, weather at the top, and how much water and food to bring. Works offline.">
-  <meta name="theme-color" content="#2f5d50">
+  <meta name="description" content="Free hike planner for anywhere in the world: type a trail and get your time at your own pace, daylight, weather at the top, water, food, and campsites you can reach before dark. Works offline.">
+  <meta name="theme-color" content="#1f4d3f">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <!-- Installs like an app on iPhone (full screen, its own name and icon). iPhones need a PNG icon. -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="hikepace">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <img src="icon.svg" alt="" width="40" height="40">
-    <div>
-      <h1>hikepace</h1>
-      <p>Know your time, daylight, weather, water and food before you go.</p>
+  <!-- App bar: stays at the top like a phone app. Units and settings on the right. -->
+  <header class="appbar">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="34" height="34">
+      <div><h1>hikepace</h1><p>your hike, at your pace</p></div>
+    </div>
+    <div class="appbar-right">
+      <button type="button" id="units-btn" class="chip-btn" aria-label="Switch between miles and kilometers">mi · ft</button>
+      <button type="button" id="settings-btn" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
     </div>
   </header>
 
   <main>
     <div id="offline-note" class="alert warn" hidden>You're offline. Your saved trips below still work.</div>
 
-    <form id="plan-form" class="panel" novalidate>
-      <h2>Plan a hike</h2>
-
-      <div class="import">
-        <label for="gpx" class="import-btn">📂 Import a route (GPX file)</label>
-        <input type="file" id="gpx" hidden>
-        <span class="small muted">Fills in the trailhead, the way up and the way back for you. <a href="#gpx-help" id="gpx-help-link">Where do I get a GPX file?</a></span>
-        <div id="gpx-help" class="small gpx-help" hidden></div>
-        <div id="gpx-status" class="small"></div>
-      </div>
-      <p class="or"><span>or type it in</span></p>
-
-      <label for="place">Trail, landmark, town, or coordinates</label>
-      <div class="row">
-        <input id="place" placeholder="e.g. Soldier Pass Trail, Sedona  ·  or 34.885, -111.782" autocomplete="off">
-        <button type="button" id="place-search">Search</button>
-        <button type="button" id="place-gps" class="secondary" title="Use my location">📍</button>
-      </div>
-      <ul id="place-results" class="place-results"></ul>
-      <p id="place-chosen" class="chosen"></p>
-
-      <h3 class="step">The way up</h3>
-      <div class="grid">
-        <div><label for="up-miles">Miles to the top</label><input id="up-miles" type="number" min="0.1" step="any" placeholder="e.g. 16" required>
-          <p class="small muted hint-under">Or to the turnaround point if there's no peak.</p></div>
-        <div><label for="up-gain">Climb to the top (feet)</label><input id="up-gain" type="number" min="0" step="any" placeholder="e.g. 10400"></div>
-        <div><label for="trailhead-elev">Trailhead elevation (feet)</label><input id="trailhead-elev" type="number" min="-300" step="any" placeholder="Filled in when you pick a place">
-          <p id="elev-note" class="small muted hint-under">Above 6,000 ft, thinner air slows most people down, so hikepace adds time.</p></div>
-      </div>
-
-      <h3 class="step">The way back</h3>
-      <div class="grid">
-        <div><label for="ending">How do you get back?</label>
-          <select id="ending">
-            <option value="outback">Same trail back down</option>
-            <option value="loop">Different trail back (loop)</option>
-            <option value="oneway">To a tram, shuttle or car</option>
-          </select></div>
-        <div id="end-type-wrap" hidden><label for="end-type">What's at the end?</label>
-          <select id="end-type">
-            <option value="tram">Tram or gondola</option>
-            <option value="shuttle">Shuttle or bus</option>
-            <option value="car">A car picking me up</option>
-          </select></div>
-        <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="any" placeholder="e.g. 5.5"></div>
-        <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (feet, optional)</label><input id="back-gain" type="number" min="0" step="any" placeholder="0"></div>
-        <div id="last-time-wrap" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time">
-          <p class="small muted hint-under">Check their website. hikepace warns you if you might miss it.</p></div>
-      </div>
-      <p id="totals" class="totals"></p>
-
-      <h3 class="step">When and how fast</h3>
-      <div class="grid">
-        <div><label for="date">Date</label><input id="date" type="date" required></div>
-        <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
-        <div><label for="nights">Trip type</label>
-          <select id="nights">
-            <option value="0">Day hike</option>
-            <option value="1">Backpacking, 1 night</option>
-            <option value="2">Backpacking, 2 nights</option>
-            <option value="3">Backpacking, 3 nights</option>
-          </select>
-          <label id="cooking-wrap" class="check" hidden><input type="checkbox" id="cooking" checked> I'll cook at camp (stove)</label></div>
-        <div><label for="pace">Your pace</label>
-          <select id="pace">
-            <option value="relaxed">Relaxed</option>
-            <option value="average" selected>Average</option>
-            <option value="fast">Fast</option>
-            <option value="custom">My own pace (from a past climb)</option>
-          </select>
-          <p id="pace-desc" class="small muted pace-desc"></p>
-          <p class="small muted hint-under">Hiking with others? Pick the slowest person's pace.</p></div>
-      </div>
-      <div id="my-pace" class="my-pace" hidden>
-        <b>Teach hikepace your pace</b>
-        <p class="small muted">Use the way up of a hike you already did. Long breaks at the top don't count. If you recorded a hike on a watch or app, import its GPX above and it reads the times for you.</p>
-        <div class="grid">
-          <div><label for="past-miles">Miles to the top</label><input id="past-miles" type="number" min="0.1" step="any" placeholder="e.g. 3"></div>
-          <div><label for="past-gain">Climb to the top (feet)</label><input id="past-gain" type="number" min="0" step="any" placeholder="e.g. 2600"></div>
-          <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="any" placeholder="e.g. 1.5"></div>
+    <form id="plan-form" novalidate>
+      <!-- Step 1: where. Typing a trail name fills in the distance and climb by itself. -->
+      <section class="panel hero">
+        <p class="step-num">1 · Where</p>
+        <h2>Where are you hiking? <span class="wave" aria-hidden="true">🏔️</span></h2>
+        <label for="place" class="sr-only">Trail, peak, landmark, town, or coordinates</label>
+        <div class="search">
+          <input id="place" placeholder="Type a trail, e.g. Echo Canyon Trail" autocomplete="off" enterkeyhint="search">
+          <button type="button" id="place-search" aria-label="Search">Search</button>
         </div>
-        <button type="button" id="past-save" class="secondary">Save my pace</button>
-        <p id="past-result" class="small"></p>
-      </div>
-      <button id="plan-btn" type="submit" class="primary">Plan my hike</button>
-      <p class="privacy">🔒 Your trips are saved only on this device. They are never uploaded, and nobody else can see them. We only count visits anonymously (no cookies, no names, no exact places).</p>
+        <div class="search-extra">
+          <button type="button" id="place-gps" class="ghost">📍 Near me</button>
+          <label for="gpx" class="ghost">📂 Use a GPX file</label>
+          <input type="file" id="gpx" accept=".gpx,application/gpx+xml" hidden>
+          <a href="#gpx-help" id="gpx-help-link" class="small">What's GPX?</a>
+        </div>
+        <div id="gpx-help" class="small gpx-help" hidden></div>
+        <ul id="place-results" class="place-results"></ul>
+        <p id="place-chosen" class="chosen"></p>
+        <div id="route-card" class="route-card" hidden></div>
+        <div id="gpx-status" class="small"></div>
+      </section>
+
+      <!-- Step 2: the trail. Filled in for you when we find the trail; change anything. -->
+      <section class="panel">
+        <p class="step-num">2 · The trail</p>
+        <h2>The way up</h2>
+        <div class="grid">
+          <div><label for="up-miles"><span class="u-dist">Miles</span> to the top</label><input id="up-miles" type="number" min="0.1" step="any" inputmode="decimal" placeholder="e.g. 4" required>
+            <p class="small muted hint-under">Or to the turnaround point if there's no peak.</p></div>
+          <div><label for="up-gain">Climb to the top (<span class="u-elev">feet</span>)</label><input id="up-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 1500"></div>
+          <div><label for="trailhead-elev">Trailhead elevation (<span class="u-elev">feet</span>)</label><input id="trailhead-elev" type="number" min="-300" step="any" inputmode="decimal" placeholder="Filled in when you pick a place">
+            <p id="elev-note" class="small muted hint-under">High up, thinner air slows most people down, so hikepace adds time.</p></div>
+        </div>
+
+        <h2>The way back</h2>
+        <div class="grid">
+          <div><label for="ending">How do you get back?</label>
+            <select id="ending">
+              <option value="outback">Same trail back</option>
+              <option value="loop">Different trail back (loop)</option>
+              <option value="oneway">To a tram, shuttle or car</option>
+            </select></div>
+          <div id="end-type-wrap" hidden><label for="end-type">What's at the end?</label>
+            <select id="end-type">
+              <option value="tram">Tram or gondola</option>
+              <option value="shuttle">Shuttle or bus</option>
+              <option value="car">A car picking me up</option>
+            </select></div>
+          <div id="back-miles-wrap" hidden><label for="back-miles" id="back-miles-label">Miles from the top to the end</label><input id="back-miles" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 5.5"></div>
+          <div id="back-gain-wrap"><label for="back-gain">Extra climbing on the way back (<span class="u-elev">feet</span>, optional)</label><input id="back-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div>
+          <div id="last-time-wrap" hidden><label for="last-time">Last tram or shuttle leaves at (optional)</label><input id="last-time" type="time">
+            <p class="small muted hint-under">Check their website. hikepace warns you if you might miss it.</p></div>
+        </div>
+        <p id="totals" class="totals"></p>
+      </section>
+
+      <!-- Step 3: when and how fast. -->
+      <section class="panel">
+        <p class="step-num">3 · When &amp; how fast</p>
+        <div class="grid">
+          <div><label for="date">Date</label><input id="date" type="date" required></div>
+          <div><label for="time">Start time</label><input id="time" type="time" value="07:00" required></div>
+          <div><label for="nights">Trip type</label>
+            <select id="nights">
+              <option value="0">Day hike</option>
+              <option value="1">Backpacking, 1 night</option>
+              <option value="2">Backpacking, 2 nights</option>
+              <option value="3">Backpacking, 3 nights</option>
+            </select>
+            <label id="cooking-wrap" class="check" hidden><input type="checkbox" id="cooking" checked> I'll cook at camp (stove)</label></div>
+        </div>
+
+        <h2>Your pace</h2>
+        <p class="small muted">Tap the one that sounds like you. Hiking with others? Pick the slowest person's pace.</p>
+        <input type="hidden" id="pace" value="average">
+        <div id="pace-cards" class="pace-cards" role="radiogroup" aria-label="Your pace"></div>
+        <p id="pace-desc" class="small muted pace-desc"></p>
+        <div id="my-pace" class="my-pace" hidden>
+          <b>Teach hikepace your pace</b>
+          <p class="small muted">Use the way up of a hike you already did. Long breaks at the top don't count. If you recorded a hike on a watch or app, use its GPX file above and it reads the times for you.</p>
+          <div class="grid">
+            <div><label for="past-miles"><span class="u-dist">Miles</span> to the top</label><input id="past-miles" type="number" min="0.1" step="any" inputmode="decimal" placeholder="e.g. 3"></div>
+            <div><label for="past-gain">Climb to the top (<span class="u-elev">feet</span>)</label><input id="past-gain" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 2600"></div>
+            <div><label for="past-hours">Time to reach the top (hours)</label><input id="past-hours" type="number" min="0.25" step="any" inputmode="decimal" placeholder="e.g. 1.5"></div>
+          </div>
+          <button type="button" id="past-save" class="secondary">Save my pace</button>
+          <p id="past-result" class="small"></p>
+        </div>
+      </section>
+
+      <button id="plan-btn" type="submit" class="primary">Plan my hike 🥾</button>
+      <p class="privacy">🔒 Your trips stay on this device. Nothing you type is uploaded, and we only count visits anonymously.</p>
     </form>
 
-    <section id="results" class="panel" hidden aria-live="polite"></section>
+    <section id="results" class="panel results" hidden aria-live="polite"></section>
 
     <section id="saved" class="panel no-print" hidden>
-      <h2>Saved trips (work offline)</h2>
-      <p class="small muted">Only on this device. Clearing your browser data deletes them.</p>
+      <h2>Saved trips <span class="small muted">(work offline)</span></h2>
       <ul id="saved-list" class="saved-list"></ul>
     </section>
   </main>
 
+  <!-- Settings: units, what each pace means, your saved pace. -->
+  <dialog id="settings" class="sheet">
+    <div class="sheet-head"><h2>Settings</h2><button type="button" class="icon-btn dark" data-close aria-label="Close">✕</button></div>
+    <h3>Units</h3>
+    <div class="seg" role="radiogroup" aria-label="Units">
+      <button type="button" data-units="metric">Kilometers · meters · °C</button>
+      <button type="button" data-units="imperial">Miles · feet · °F</button>
+    </div>
+    <h3>What the paces mean</h3>
+    <p class="small muted">Based on Naismith's hiking rule, checked against 8,648 GPS-recorded hikes and real hikes from our hiker survey. Times include short rests.</p>
+    <div id="pace-explain"></div>
+    <h3>Your own pace</h3>
+    <p id="my-pace-status" class="small"></p>
+    <h3>Your data</h3>
+    <p class="small muted">Trips and your pace are saved only on this phone.</p>
+    <button type="button" id="clear-data" class="secondary">Delete my saved trips and pace</button>
+  </dialog>
+
   <footer class="no-print">
-    Free and open source. Weather by <a href="https://open-meteo.com/">Open-Meteo</a>. Campsites and water © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors and Recreation.gov.
+    Free and open source. Weather and elevation by <a href="https://open-meteo.com/">Open-Meteo</a>. Trails, campsites and water © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors. US campgrounds from Recreation.gov.
     Estimates are a rough guide, not a safety guarantee.
   </footer>
 

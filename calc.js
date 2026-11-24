@@ -1,6 +1,8 @@
 // hikepace: the math behind every estimate.
 // Pure functions only (no page or network code), so they are easy to test.
 // Every number here is a rough guide, and the app says so on screen.
+// Inside, everything is in miles, feet and °F. units.js turns that into km, m and °C for people who use them.
+import { dist, elev, temp, speed } from "./units.js";
 
 // ---------- Time on trail ----------
 
@@ -11,12 +13,20 @@
 // people who called themselves "fast" matched Naismith's rule, but "average" hikers took
 // about 1.3-1.4x as long once long breaks at the top are taken out. So "average" is 1.2 here
 // (1.2 x the 10-minute rests above ≈ 1.4x Naismith), and "relaxed" is a step slower than that.
+// Checked against 8,648 GPS-recorded hikes by 321 people from hikr.org (Kaggle, public domain), mostly
+// experienced Alpine hikers: relaxed ≈ their slowest 10%, average ≈ slower than their typical hiker
+// (casual hikers are slower, as the survey showed), fast ≈ their fastest 15%.
 export const PACES = {
-  relaxed: { label: "Relaxed", factor: 1.5 },
-  average: { label: "Average", factor: 1.2 },
-  fast: { label: "Fast", factor: 0.8 },
-  custom: { label: "Your own" }, // learned from a past hike
+  relaxed: { label: "Relaxed", emoji: "🐢", factor: 1.5, who: "Lots of stops, new to hiking, hiking with kids, or taking photos." },
+  average: { label: "Average", emoji: "🥾", factor: 1.2, who: "Most people who hike now and then, with normal breaks." },
+  fast: { label: "Fast", emoji: "⚡", factor: 0.85, who: "You hike or run often and keep breaks short." },
+  custom: { label: "Your own", emoji: "📈" }, // learned from a past hike
 };
+
+// How much one person's time changes from hike to hike: in the hikr.org data, 80% of a person's hikes
+// took between 0.77x and 1.32x their usual time (heat, breaks, how they felt). So the "if you get tired"
+// end of every range is at least 1.3x the "keep your pace" end.
+const SPREAD = 1.3;
 
 // "Effort hours": how long a stretch takes at average pace, rests included.
 export function effortHours(miles, gainFt, descentFt = 0) {
@@ -36,10 +46,16 @@ export function paceFactor(pace) {
 }
 
 // Plain-English version of a pace, e.g. "about 2.3 mph on flat ground, plus 1 hour for every 1,540 ft of climbing".
+// The 7/6 is the short rests that effort hours include, so this is the average speed with those rests.
 export function describePace(factor) {
-  const mph = 3 / factor;
-  const ftPerHour = Math.round(2000 / factor / 10) * 10;
-  return `about ${mph.toFixed(1)} mph on flat ground, plus 1 hour for every ${ftPerHour.toLocaleString()} ft of climbing`;
+  const perHour = 3 / (factor * (7 / 6));
+  const climbPerHour = 2000 / (factor * (7 / 6));
+  return `about ${dist(perHour)} an hour on flat ground, plus 1 hour for every ${elev(climbPerHour)} of climbing (short rests included)`;
+}
+
+// What a pace means for a typical hike: 8 km / 5 mi with 500 m / 1,640 ft of climbing, there and back on the same trail.
+export function sampleHike(factor) {
+  return { miles: 5, gainFt: 1640, ...timeRange(effortHours(5, 1640, 1640), { factor }) };
 }
 
 // Effort of the climb we learned a pace from, with its own altitude taken out
@@ -56,14 +72,16 @@ export function timeRange(effort, pace) {
     const ratio = effort / refEffort(pace.ref);
     if (ratio <= 1) {
       const best = pace.ref.hours * ratio;
-      return { best, worst: best * 1.15 };
+      return { best, worst: best * SPREAD };
     }
     // Longer than the climb we learned from. Runners use the same idea (Riegel's formula):
     // twice the distance takes a bit more than twice the time. The tired case slows down much more.
-    return { best: pace.ref.hours * ratio ** 1.06, worst: pace.ref.hours * ratio ** 1.45 };
+    const best = pace.ref.hours * ratio ** 1.06;
+    return { best, worst: Math.max(best * SPREAD, pace.ref.hours * ratio ** 1.45) };
   }
+  // Presets: a normal bad day (SPREAD), plus a little more on long days, when people slow down most.
   const best = effort * pace.factor;
-  return { best, worst: best * (1 + Math.min(0.4, 0.03 * best)) };
+  return { best, worst: best * (SPREAD + Math.min(0.15, 0.015 * best)) };
 }
 
 // How the hike ends:
@@ -154,15 +172,15 @@ export function gearChecklist(w) {
   add("Essentials", "Tell someone your plan and when you'll be back", "If something goes wrong, someone knows where to look.");
   if (w.headlamp) add("Essentials", "Headlamp, fully charged, plus spare batteries or a cable", `${w.headlampWhy} Charge it the night before: a dead headlamp on a dark descent is a real danger.`);
   if (w.maxUv >= 3 || w.maxFeelsF >= 75 || snowy) add("Essentials", "Sunscreen, sunglasses and a sun hat", snowy ? "Snow reflects sunlight, so you can burn even when it's cold." : `UV index up to ${f(w.maxUv)}.`);
-  if (w.maxFeelsF >= 85) add("Essentials", "Electrolytes or salty snacks", `Feels like up to ${f(w.maxFeelsF)}°F. You will sweat out salt, not just water.`);
+  if (w.maxFeelsF >= 85) add("Essentials", "Electrolytes or salty snacks", `Feels like up to ${temp(w.maxFeelsF)}. You will sweat out salt, not just water.`);
 
   // Clothing
   if (w.minFeelsF < 45) add("Clothing", "Base layer (wool or synthetic, not cotton)", "Cotton stays wet and pulls heat from your body.");
-  if (w.minFeelsF < 60) add("Clothing", "Warm mid-layer (fleece or light puffy)", `Feels like ${f(w.minFeelsF)}°F at the coldest point, including at the top.`);
-  if (w.minFeelsF < 32) add("Clothing", "Insulated puffy jacket", `Feels like ${f(w.minFeelsF)}°F. Put it on at every stop, before you get cold.`);
-  if (w.minFeelsF < 40) add("Clothing", "Warm hat and gloves", `Feels like ${f(w.minFeelsF)}°F. Hands and ears get cold first.`);
-  if (w.minFeelsF < 15) add("Clothing", "Hand warmers and spare gloves", `Feels like ${f(w.minFeelsF)}°F. Damp gloves stop working.`);
-  if (w.maxGustMph >= 20) add("Clothing", "Wind shell", `Gusts up to ${f(w.maxGustMph)} mph. A rain shell works but you may sweat more.`);
+  if (w.minFeelsF < 60) add("Clothing", "Warm mid-layer (fleece or light puffy)", `Feels like ${temp(w.minFeelsF)} at the coldest point, including at the top.`);
+  if (w.minFeelsF < 32) add("Clothing", "Insulated puffy jacket", `Feels like ${temp(w.minFeelsF)}. Put it on at every stop, before you get cold.`);
+  if (w.minFeelsF < 40) add("Clothing", "Warm hat and gloves", `Feels like ${temp(w.minFeelsF)}. Hands and ears get cold first.`);
+  if (w.minFeelsF < 15) add("Clothing", "Hand warmers and spare gloves", `Feels like ${temp(w.minFeelsF)}. Damp gloves stop working.`);
+  if (w.maxGustMph >= 20) add("Clothing", "Wind shell", `Gusts up to ${speed(w.maxGustMph)}. A rain shell works but you may sweat more.`);
   if (w.maxRainChance >= 30) add("Clothing", "Rain shell and a pack cover or liner", `Up to ${f(w.maxRainChance)}% chance of rain.`);
   if (w.maxRainChance >= 50 || snowy) add("Clothing", "Waterproof shoes or extra socks", "Wet feet get cold and blister fast.");
   if (snowy) add("Clothing", "Gaiters", "They keep snow out of your shoes.");
@@ -170,7 +188,7 @@ export function gearChecklist(w) {
   // Traction and safety
   if (icy) add("Traction & safety", "Microspikes (traction for snow and ice)",
     w.snowDuring ? "Snow is in the forecast during your hike." : w.snowRecentCm >= 1 ? `About ${f(w.snowRecentCm)} cm of snow fell near the trailhead in the last 3 days, and higher up there is usually more.` : "Below freezing at the top with rain or snow possible, so the trail may be icy.");
-  if (w.totalGainFt >= 2000 || snowy) add("Traction & safety", "Trekking poles", snowy ? "Extra balance on snow and ice." : `${w.totalGainFt.toLocaleString()} ft of climbing. Poles save your knees on the way down.`);
+  if (w.totalGainFt >= 2000 || snowy) add("Traction & safety", "Trekking poles", snowy ? "Extra balance on snow and ice." : `${elev(w.totalGainFt)} of climbing. Poles save your knees on the way down.`);
   if (snowy && w.topFt >= 8000) add("Traction & safety", "Check the avalanche forecast (avalanche.org)", "Recent snow on high, steep slopes can slide. Avoid steep snowy slopes if you're unsure.");
   if (w.thunder) add("Traction & safety", "A turnaround time before storms", "Thunderstorms are possible. Plan to be off peaks and open ridges early.");
 
@@ -180,7 +198,7 @@ export function gearChecklist(w) {
     if (w.cooking) add("Camp", "Stove, fuel and a lighter", w.nightLowF !== null && w.nightLowF < 32 ? "Below freezing, gas canisters weaken. Bring extra fuel and keep the canister in your sleeping bag overnight." : "For dinner and breakfast.");
     if (w.nightLowF !== null) {
       const bag = Math.floor((w.nightLowF - 10) / 5) * 5;
-      add("Camp", `Sleeping bag rated about ${bag}°F`, `Night low near ${f(w.nightLowF)}°F at camp. A much warmer bag can be just as bad: you will sweat and sleep poorly.`);
+      add("Camp", `Sleeping bag rated about ${temp(bag)}`, `Night low near ${temp(w.nightLowF)} at camp. A much warmer bag can be just as bad: you will sweat and sleep poorly.`);
       if (w.nightLowF < 40) add("Camp", "Insulated sleeping pad (R-value 4 or higher)", "The cold ground takes more heat than the air does.");
       if (w.nightLowF < 32) add("Camp", "Keep water from freezing", "Use an insulated bottle, or store bottles upside down and inside your tent.");
     }
@@ -196,10 +214,10 @@ export function warnings({ day, w }) {
   if (day.darkLikely) list.push({ level: "danger", text: "Even at your pace, you finish after sunset. Start earlier, or bring a charged headlamp and plan to hike in the dark." });
   else if (day.darkPossible) list.push({ level: "warn", text: "If you get tired, you could finish after sunset. Bring a charged headlamp." });
   else if (day.tight) list.push({ level: "warn", text: "If you get tired, you finish within 30 minutes of sunset. Little room for delays." });
-  if (w.maxFeelsF >= 95) list.push({ level: "danger", text: `Extreme heat: feels like up to ${Math.round(w.maxFeelsF)}°F. Start at sunrise and finish before midday.` });
-  else if (w.maxFeelsF >= 85) list.push({ level: "warn", text: `Hot: feels like up to ${Math.round(w.maxFeelsF)}°F. Start early and carry the high end of the water range.` });
-  if (w.minFeelsF <= 20) list.push({ level: "danger", text: `Very cold: feels like ${Math.round(w.minFeelsF)}°F. Frostbite risk on exposed skin.` });
-  if (w.maxGustMph >= 40) list.push({ level: "danger", text: `Strong gusts up to ${Math.round(w.maxGustMph)} mph. Exposed ridges can be dangerous.` });
+  if (w.maxFeelsF >= 95) list.push({ level: "danger", text: `Extreme heat: feels like up to ${temp(w.maxFeelsF)}. Start at sunrise and finish before midday.` });
+  else if (w.maxFeelsF >= 85) list.push({ level: "warn", text: `Hot: feels like up to ${temp(w.maxFeelsF)}. Start early and carry the high end of the water range.` });
+  if (w.minFeelsF <= 20) list.push({ level: "danger", text: `Very cold: feels like ${temp(w.minFeelsF)}. Frostbite risk on exposed skin.` });
+  if (w.maxGustMph >= 40) list.push({ level: "danger", text: `Strong gusts up to ${speed(w.maxGustMph)}. Exposed ridges can be dangerous.` });
   return list;
 }
 

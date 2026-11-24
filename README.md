@@ -2,7 +2,7 @@
 
 (Formerly called Trail Prep. Live at https://suhibug.github.io/hikepace/)
 
-A free hike planner that tells you, before you leave:
+A free hike planner for **anywhere in the world**. Type a trail's name, and it measures the trail for you (distance, climb, highest point) and tells you, before you leave:
 
 - **How long the hike will take** for your pace and group size
 - **Daylight**: when you'll reach the top, when you'll finish, the latest safe start time, and what time to start to see sunrise from the top
@@ -12,6 +12,12 @@ A free hike planner that tells you, before you leave:
 - **Safety warnings** for storms, heat, cold, strong wind, and finishing after dark
 - **Where to camp tonight** (backpacking): the campsites near your route that **you** can reach before dark at your own pace, the best pick (the farthest one with water close by), and whether camping is allowed on that land (BLM, National Forest, National Park, state, tribal or private)
 - **Water on the way**: springs and taps along your route, with the mile you reach each one
+
+**Type a trail, get the numbers:** search "Echo Canyon Trail" or "Snowdon Ranger Path" and hikepace finds the trail's path on OpenStreetMap, joins its pieces, and measures it with free elevation data. You can still change any number.
+
+**Kilometers or miles:** tap the unit button at the top (or Settings). People outside the US get kilometers, meters and °C by default.
+
+**Fun to use:** tap-to-pick pace cards, a sun bar with a little boot walking from your start to your finish, a climb chart you can slide your finger along to see when you'll reach each point, water and tent pins on the chart, a pack list you tick off, and a small celebration when your plan is ready. People who turn off motion on their phone don't get the animations.
 
 **Import a route:** load a GPX file from AllTrails, Strava, Garmin, Coros, or most other hiking apps, and hikepace fills in the trailhead, distance, and elevation gain. The file is read on your device and never uploaded.
 
@@ -51,10 +57,11 @@ On a phone, open the site and choose **Add to Home Screen** to use it like an ap
 
 All numbers are rough guides, and the app says so.
 
-- **Time, as a range:** Naismith's rule (3 mph, plus 1 hour per 2,000 ft of climbing), about 10 minutes of rest per hour, and about 10 more minutes per 1,000 ft of descent. Every time is shown as a range from "if you keep your pace" to "if you get tired"; the range widens on longer days because people slow down as the day goes on. Safety warnings use the tired end.
-  - **Relaxed:** about 2 mph on flat ground, plus 1 hour for every 1,330 ft of climbing
-  - **Average:** about 2.5 mph on flat ground, plus 1 hour for every 1,670 ft of climbing (set from the November 2026 survey's real hikes)
-  - **Fast:** about 3.8 mph on flat ground, plus 1 hour for every 2,500 ft of climbing
+- **Time, as a range:** Naismith's rule (3 mph, plus 1 hour per 2,000 ft of climbing), about 10 minutes of rest per hour, and about 10 more minutes per 1,000 ft of descent. Every time is shown as a range from "if you keep your pace" to "if you get tired". The tired end is at least 1.3 times the first, because in 8,648 recorded hikes one person's times varied that much from day to day (heat, breaks, how they felt), and it widens a bit more on long days. Safety warnings use the tired end.
+  - 🐢 **Relaxed:** about 1.7 mph (2.8 km/h) on flat ground, plus 1 hour for every 1,140 ft (350 m) of climbing, short rests included
+  - 🥾 **Average:** about 2.1 mph (3.4 km/h), plus 1 hour for every 1,430 ft (440 m) (set from the November 2026 survey's real hikes)
+  - ⚡ **Fast:** about 3 mph (4.8 km/h), plus 1 hour for every 2,020 ft (615 m)
+  - Settings shows each pace with an example hike, so people can pick the right one.
   - **Your own pace:** learned from the way up of a climb you already did. For hikes much longer than that climb, hikepace scales the time the way endurance runners do (Riegel's formula) and adds a "getting tired" case.
 - **Altitude:** above about 6,000 ft, thinner air slows most people down, so times get about 6% longer per 1,000 ft (measured at the middle of the climb). The trailhead elevation is filled in for you and can be corrected.
 - **Temperature at the top:** about 3.5 °F colder per 1,000 ft of climbing.
@@ -67,6 +74,10 @@ All numbers are rough guides, and the app says so.
 
 The formulas live in `calc.js` so they're easy to read and change.
 
+### Checked against real hikes
+
+The paces were checked against the free [GPS-recorded hikes from hikr.org](https://www.kaggle.com/datasets/roccoli/gpx-hike-tracks) dataset on Kaggle (public domain): 8,648 usable hikes by 321 people, mostly experienced hikers in the Alps. Relaxed matches their slowest 10%, Fast their fastest 15%, and Average is a bit slower than their typical hiker, which fits casual hikers (the survey showed the same). It also showed breaks take about 30% of a hiking day, and that harder terrain is slower.
+
 ## Where the data comes from
 
 All free:
@@ -74,12 +85,13 @@ All free:
 | Data | Source |
 |---|---|
 | Weather, sunrise and sunset, elevation | [Open-Meteo](https://open-meteo.com/) |
-| Place and trail search | [OpenStreetMap](https://www.openstreetmap.org/) (Nominatim) |
+| Place and trail search, and each trail's path | [OpenStreetMap](https://www.openstreetmap.org/) (Nominatim) |
+| Height along a trail | [Open-Meteo elevation](https://open-meteo.com/en/docs/elevation-api) (Copernicus 90 m map) |
 | Campsites, tent spots, springs, drinking water, trailheads | © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL license |
 | Federal campgrounds (with booking links) | [Recreation.gov RIDB](https://ridb.recreation.gov/) |
 | Who manages the land | [Bureau of Land Management](https://gis.blm.gov/) Surface Management Agency map |
 
-Campsite and water data covers **Arizona** for now. To add a state, run the two tools below with its code (for example `US-UT`).
+Campsites and water work **everywhere**: Arizona uses ready-made files (with US federal campgrounds), and everywhere else is asked live from OpenStreetMap (Overpass, with Nominatim as the backup). The land-manager check is US only. To add ready-made files for another state, run the two tools below with its code (for example `US-UT`).
 
 ## What each file does
 
@@ -87,7 +99,10 @@ Campsite and water data covers **Arizona** for now. To add a state, run the two 
 |---|---|
 | `index.html` | The page: the plan form and the empty results area |
 | `style.css` | How it looks, including the phone layout (app-like on the home screen) and dark mode |
-| `app.js` | Page logic: place search, GPX import, forecast, building the plan, "where to camp", saved trips |
+| `app.js` | Page logic: place search, GPX import, forecast, building the plan, the sun bar and climb chart, "where to camp", settings, saved trips |
+| `trail.js` | Turns a searched trail into a full route: gets its pieces from OpenStreetMap, joins them, and adds heights from Open-Meteo |
+| `places.js` | Finds campsites, springs and water near a trail anywhere (ready-made files first, then live from OpenStreetMap), and the US land-manager lookup |
+| `units.js` | Miles/feet/°F or kilometers/meters/°C. The math always works in miles and feet; this only changes what people see and type |
 | `calc.js` | All the math, as plain functions with no page code: time, pace, water, food, daylight, gear, warnings, campsites along a route |
 | `sw.js` | Service worker: saves the app (and the campsite data you've looked at) on the phone so it works with no signal |
 | `manifest.webmanifest`, `icon*.png`, `icon.svg` | Lets phones install hikepace to the home screen with its own icon |
@@ -119,7 +134,8 @@ Then open http://localhost:8000.
 
 ## Ideas for later (from the survey)
 
-- More states for campsites and water
+- Trail search suggestions as you type
+- A map view of the trail with campsites and water
 - User reports on springs (flowing or dry) and campsites
 - Permits for specific areas
 - Road conditions to the trailhead

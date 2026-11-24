@@ -1,14 +1,23 @@
-// hikepace: page logic. Weather comes from Open-Meteo (free, no account or key).
+// hikepace: page logic. Works anywhere in the world, all with free services and no accounts:
+//   weather, sunrise/sunset and elevation: Open-Meteo · trails, campsites, water: OpenStreetMap
+//   (US only) federal campgrounds: Recreation.gov · who manages the land: Bureau of Land Management
 import {
-  PACES, ENDINGS, END_TYPES, estimateHike, paceFactor, describePace, tempAtTop, estimateWater, estimateFood,
-  gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats,
+  PACES, ENDINGS, END_TYPES, estimateHike, paceFactor, describePace, sampleHike, tempAtTop, estimateWater, estimateFood,
+  gearChecklist, warnings, describeWeather, isThunder, addHours, formatDuration, routeStats, routeEffort, timeRange,
   campsAlongRoute, waterAlongRoute, campRules, milesBetween,
 } from "./calc.js";
+import * as U from "./units.js";
+import { trailRoute } from "./trail.js";
+import { placesAround, landAt } from "./places.js";
 
 const $ = (id) => document.getElementById(id);
-const STORE_KEY = "trailprep.trips";
-// route = the GPX points when a route was imported (needed for "where can I camp?" and water along the way).
+const STORE_KEY = "trailprep.trips"; // old name on purpose: keeps trips saved before the rename
+// route = the trail's points (from a GPX file or found on the map), needed for the climb chart,
+// "where can I camp?" and water along the way.
 const state = { place: null, forecast: null, inputs: null, route: null };
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const round1 = (x) => Math.round(x * 10) / 10;
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---------- Times ----------
 // Open-Meteo gives times in the trail's own time zone. We keep every time as a
@@ -17,6 +26,8 @@ const state = { place: null, forecast: null, inputs: null, route: null };
 const parseLocal = (s) => new Date(s.length === 16 ? s + ":00Z" : s + "Z");
 const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
 const fmtDay = (d) => d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const fmtRange = (r) => `${fmtTime(r.best)} – ${fmtTime(r.worst)}`;
+const fmtBetween = (r) => `between ${fmtTime(r.best)} and ${fmtTime(r.worst)}`;
 
 // ---------- Usage counts ----------
 // Anonymous counts through GoatCounter and Google Analytics 4 (no names). Only the action and the
@@ -31,30 +42,72 @@ function track(name, title) {
   } catch {}
 }
 
+// ---------- Units in the form ----------
+// People type in their own units; inside, the app always works in miles and feet.
+const DIST_FIELDS = ["up-miles", "back-miles", "past-miles"];
+const ELEV_FIELDS = ["up-gain", "trailhead-elev", "back-gain", "past-gain"];
+const readDist = (id) => ($(id).value === "" ? 0 : U.fromDist(+$(id).value));
+const readElev = (id) => ($(id).value === "" ? null : U.fromElev(+$(id).value));
+const setDist = (id, mi) => { $(id).value = mi == null || mi === "" || !Number.isFinite(+mi) ? "" : round1(U.toDist(mi)); };
+const setElev = (id, ft) => { $(id).value = ft == null || ft === "" || !Number.isFinite(+ft) ? "" : Math.round(U.toElev(ft)); };
+// "mile 5" or "km 8"
+const atMile = (mi) => (U.metric() ? `km ${round1(mi * 1.609344)}` : `mile ${round1(mi)}`);
+
+function showUnits() {
+  const m = U.metric();
+  $("units-btn").textContent = m ? "km · m" : "mi · ft";
+  document.querySelectorAll(".u-dist").forEach((el) => { el.textContent = m ? "Kilometers" : "Miles"; });
+  document.querySelectorAll(".u-elev").forEach((el) => { el.textContent = m ? "meters" : "feet"; });
+  document.querySelectorAll("[data-units]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.units === U.getUnits())));
+  $("up-miles").placeholder = m ? "e.g. 6" : "e.g. 4";
+  $("up-gain").placeholder = m ? "e.g. 450" : "e.g. 1500";
+}
+
+// Switching units converts whatever is already typed, so nothing has to be entered again.
+function switchUnits(u) {
+  if (u === U.getUnits()) return;
+  const dists = DIST_FIELDS.map((id) => ($(id).value === "" ? "" : readDist(id)));
+  const elevs = ELEV_FIELDS.map((id) => readElev(id));
+  U.setUnits(u);
+  DIST_FIELDS.forEach((id, i) => setDist(id, dists[i]));
+  ELEV_FIELDS.forEach((id, i) => setElev(id, elevs[i]));
+  showUnits();
+  updateForm();
+  renderPaceCards();
+  showPace();
+  renderSettings();
+  if (state.lastRouteStats) showRouteCard(state.lastRouteStats);
+  if (state.inputs && state.forecast && !$("results").hidden) render(state.savedName, { quiet: true });
+  renderSaved();
+  track(`units-${u}`);
+}
+
 // ---------- Place search ----------
-// One box takes a trail name, landmark, peak, town, or coordinates.
+// One box takes a trail name, landmark, peak, town, or coordinates, anywhere in the world.
 // Trails and landmarks come from OpenStreetMap (free; asks for at most 1 search per second).
 // Towns come from Open-Meteo as a backup.
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const OSM_TYPES = {
-  path: "Trail", footway: "Trail", track: "Trail", bridleway: "Trail", trailhead: "Trailhead",
-  peak: "Peak", saddle: "Pass", ridge: "Ridge", cliff: "Cliff", spring: "Spring", waterfall: "Waterfall",
+  path: "Trail", footway: "Trail", track: "Trail", bridleway: "Trail", hiking: "Trail", foot: "Trail", trailhead: "Trailhead",
+  peak: "Peak", volcano: "Peak", saddle: "Pass", ridge: "Ridge", cliff: "Cliff", spring: "Spring", waterfall: "Waterfall",
   attraction: "Landmark", viewpoint: "Viewpoint", camp_site: "Campground", picnic_site: "Picnic area",
   parking: "Parking", nature_reserve: "Park", national_park: "Park", protected_area: "Park", park: "Park",
   city: "Town", town: "Town", village: "Town", hamlet: "Town", administrative: "Town",
 };
 
 async function osmSearch(q) {
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(q)}`;
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&q=${encodeURIComponent(q)}`;
   let res;
   try { res = await fetch(url, { headers: { "Accept-Language": "en" } }); } catch { return []; } // busy or offline: fall back to towns
   if (!res.ok) return [];
   return (await res.json()).map((x) => ({
     name: x.name || x.display_name.split(",")[0],
-    area: [x.address?.city || x.address?.town || x.address?.county, x.address?.state, x.address?.country_code?.toUpperCase()].filter(Boolean).join(", "),
+    area: [x.address?.city || x.address?.town || x.address?.village || x.address?.county, x.address?.state, x.address?.country_code?.toUpperCase()].filter(Boolean).join(", "),
     region: x.address?.country_code === "us" ? x.address?.state : x.address?.country,
+    country: x.address?.country_code?.toUpperCase(),
     type: OSM_TYPES[x.type] || "Place",
+    osmType: x.osm_type, osmId: x.osm_id,
     latitude: +x.lat,
     longitude: +x.lon,
   }));
@@ -65,7 +118,7 @@ async function townSearch(q) {
   if (!res.ok) return [];
   return ((await res.json()).results || []).map((x) => ({
     name: x.name, area: [x.admin1, x.country_code].filter(Boolean).join(", "), type: "Town", latitude: x.latitude, longitude: x.longitude,
-    region: x.country_code === "US" ? x.admin1 : x.country,
+    region: x.country_code === "US" ? x.admin1 : x.country, country: x.country_code,
   }));
 }
 
@@ -98,31 +151,30 @@ async function searchPlaces(query) {
   }
   if (!results.length) results = await townSearch(query.split(",")[0]);
 
-  // Drop near-duplicates (same spot found twice).
+  // One trail is often many map pieces with the same name: show it once per area.
   const seen = new Set();
   return results.filter((r) => {
-    const key = `${r.latitude.toFixed(3)},${r.longitude.toFixed(3)}`;
+    const key = r.type === "Trail" ? `${r.name}|${r.area}` : `${r.latitude.toFixed(3)},${r.longitude.toFixed(3)}`;
     return seen.has(key) ? false : seen.add(key);
   }).slice(0, 8);
 }
 
-function placeLabel(p) {
-  return `${p.name}${p.area ? ` · ${p.area}` : ""}`;
-}
+const placeLabel = (p) => `${p.name}${p.area ? ` · ${p.area}` : ""}`;
 
 function choosePlace(p) {
-  state.route = p.route || null; // a searched place has no route; an imported GPX does
-  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, region: p.region || "Unknown" };
+  state.route = p.route || null; // a plain place has no route; a trail or a GPX file does
+  if (!p.route) { state.lastRouteStats = null; $("route-card").hidden = true; }
+  state.place = { name: placeLabel(p), lat: p.latitude, lon: p.longitude, region: p.region || "Unknown", country: p.country || null };
   $("place-results").innerHTML = "";
-  $("place-chosen").textContent = `✓ ${state.place.name} (${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)})`;
-  if (Number.isFinite(p.elevFt)) return setTrailheadElev(p.elevFt, "From your GPX file.");
+  $("place-chosen").textContent = `✓ ${state.place.name}`;
+  if (Number.isFinite(p.elevFt)) return setTrailheadElev(p.elevFt, p.elevNote || "From your route.");
   lookUpElevation(p.latitude, p.longitude);
 }
 
 // Fill in the starting elevation (used for thin-air time) and say where it came from,
 // so people can fix it when the spot they picked is the summit or a lake, not the trailhead.
 function setTrailheadElev(ft, note) {
-  $("trailhead-elev").value = ft;
+  setElev("trailhead-elev", ft);
   $("elev-note").textContent = note;
 }
 
@@ -130,18 +182,34 @@ async function lookUpElevation(lat, lon) {
   try {
     const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);
     const m = (await res.json()).elevation?.[0];
-    if (Number.isFinite(m)) setTrailheadElev(Math.round(m * 3.28084), "From the map spot you picked. If that's a summit or a lake, change it to the trailhead's elevation (it's on AllTrails or your map).");
+    if (Number.isFinite(m)) setTrailheadElev(Math.round(m * 3.28084), "From the map spot you picked. If that's a summit or a lake, change it to the trailhead's elevation.");
   } catch {
     $("elev-note").textContent = "Couldn't look it up. Add it if you know it.";
   }
 }
 
+// A trail was picked: find its whole path and fill in distance, climb and trailhead by itself.
+async function chooseTrail(r) {
+  choosePlace(r);
+  const status = $("gpx-status");
+  status.innerHTML = `<div class="loading"><span class="spinner" aria-hidden="true"></span> Walking the trail on the map to measure it…</div>`;
+  try {
+    const pts = await trailRoute(r);
+    if (!pts) throw new Error("no path");
+    applyRoute(pts, { name: r.name, area: r.area, region: r.region, country: r.country, source: "map" });
+    track("trail-autofill");
+  } catch {
+    status.innerHTML = `<div class="muted">Couldn't measure this trail from the map. Type the distance and climb below, or use a GPX file.</div>`;
+  }
+}
+
 $("place-search").addEventListener("click", async () => {
   const q = $("place").value.trim();
-  if (!q) return;
+  if (!q) return $("place").focus();
   state.place = null;
   $("place-chosen").textContent = "";
-  $("place-results").innerHTML = "<li>Searching trails, landmarks and towns…</li>";
+  $("gpx-status").innerHTML = "";
+  $("place-results").innerHTML = `<li class="loading"><span class="spinner" aria-hidden="true"></span> Searching trails, peaks and towns…</li>`;
   try {
     track("search");
     const results = await searchPlaces(q);
@@ -150,24 +218,27 @@ $("place-search").addEventListener("click", async () => {
       $("place-results").innerHTML = "<li>No match. Try one landmark on the trail (like a peak or the trailhead), the nearest town, or paste coordinates like 34.885, -111.782.</li>";
       return;
     }
-    if (results.length === 1 && !results[0].matched) return choosePlace(results[0]);
+    const pick = (r) => (r.type === "Trail" && r.osmType ? chooseTrail(r) : choosePlace(r));
+    if (results.length === 1 && !results[0].matched) return pick(results[0]);
     if (results.some((r) => r.matched)) {
       $("place-results").innerHTML = "<li>No exact match for the full name, so here are places on your trail. Pick the one closest to where you start.</li>";
     }
-    for (const r of results) {
+    results.forEach((r, i) => {
       const li = document.createElement("li");
+      li.style.setProperty("--i", i);
       const b = document.createElement("button");
       b.type = "button";
-      b.innerHTML = `<b></b> <span class="tag"></span><br><span class="small muted"></span>`;
+      b.innerHTML = `<span class="r-icon" aria-hidden="true"></span><span class="r-text"><b></b><span class="small muted"></span></span><span class="tag"></span>`;
+      b.querySelector(".r-icon").textContent = { Trail: "🥾", Peak: "🏔️", Trailhead: "🚩", Town: "🏘️", Park: "🌲", Waterfall: "💦", Spring: "💧", Campground: "⛺" }[r.type] || "📍";
       b.querySelector("b").textContent = r.name;
+      b.querySelector(".muted").textContent = r.area;
       // Skip the tag when the name already says it ("Soldier Pass" is already a pass).
       if (!r.name.toLowerCase().includes(r.type.toLowerCase())) b.querySelector(".tag").textContent = r.type;
       else b.querySelector(".tag").remove();
-      b.querySelector(".muted").textContent = r.area;
-      b.addEventListener("click", () => choosePlace(r));
+      b.addEventListener("click", () => pick(r));
       li.appendChild(b);
       $("place-results").appendChild(li);
-    }
+    });
   } catch {
     $("place-results").innerHTML = "<li>Could not search. Are you online?</li>";
   }
@@ -179,12 +250,15 @@ $("place").addEventListener("keydown", (e) => {
 $("place-gps").addEventListener("click", () => {
   if (!navigator.geolocation) return alert("This device cannot share its location.");
   navigator.geolocation.getCurrentPosition(
-    (pos) => choosePlace({ name: "My location", latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+    async (pos) => {
+      const spot = await describeSpot(pos.coords.latitude, pos.coords.longitude);
+      choosePlace({ name: "My location", ...spot, latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+    },
     () => alert("Could not get your location."),
   );
 });
 
-// ---------- Import a route (GPX) ----------
+// ---------- A route: from a GPX file, or a trail found on the map ----------
 // GPX is the route file almost every hiking app can export. Reading it happens
 // entirely on the device: the file is never uploaded anywhere.
 function readGpx(text) {
@@ -202,7 +276,7 @@ function readGpx(text) {
   return { points, name };
 }
 
-// Look up which town and state the route starts in, so the forecast and labels make sense.
+// Look up which town and country a spot is in, so the forecast and labels make sense.
 async function describeSpot(lat, lon) {
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=12&addressdetails=1&lat=${lat}&lon=${lon}`, { headers: { "Accept-Language": "en" } });
@@ -210,10 +284,110 @@ async function describeSpot(lat, lon) {
     return {
       area: [a.city || a.town || a.village || a.county, a.state, a.country_code?.toUpperCase()].filter(Boolean).join(", "),
       region: a.country_code === "us" ? a.state : a.country,
+      country: a.country_code?.toUpperCase(),
     };
   } catch {
     return { area: "", region: "Unknown" };
   }
+}
+
+// Fills the form from a route and shows a little card with its numbers and climb shape.
+// source "gpx": a file (it may end somewhere else, like at a tram). source "map": a trail we measured,
+// which most people hike there and back.
+function applyRoute(points, { name, area, region, country, source }) {
+  const r = routeStats(points);
+  const hasEle = r.gainFt !== null;
+  if (source === "map" && !r.isLoop) {
+    // There and back on the same trail: the whole trail is the way out, and every downhill on the way
+    // out is a climb on the way back.
+    setDist("up-miles", r.miles);
+    setElev("up-gain", r.gainFt);
+    setElev("back-gain", hasEle ? r.outAndBackGainFt - r.gainFt : "");
+    $("ending").value = "outback";
+  } else {
+    // The way up = start to the highest point. The way back = the rest of the route.
+    setDist("up-miles", hasEle ? r.topMiles : r.miles);
+    setElev("up-gain", r.topGainFt);
+    $("ending").value = r.isLoop ? "loop" : "oneway";
+    setDist("back-miles", hasEle ? Math.round((r.miles - r.topMiles) * 10) / 10 : 0);
+    setElev("back-gain", hasEle ? Math.max(0, r.gainFt - r.topGainFt) : "");
+  }
+  updateForm();
+  choosePlace({ name: name || "Route start", area, region, country, latitude: r.start.lat, longitude: r.start.lon, route: points,
+    elevFt: Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined,
+    elevNote: source === "map" ? "From the trail's lower end on the map." : "From your GPX file." });
+  if (name) $("place").value = name;
+  state.lastRouteStats = { ...r, source, name, points };
+  showRouteCard(state.lastRouteStats);
+
+  const status = $("gpx-status");
+  status.innerHTML = "";
+  if (!r.isLoop && source === "gpx") {
+    status.appendChild(choiceNote(`This route ends ${U.dist(r.gapMiles)} from where it starts, so I set the way back to a tram, shuttle or car. Pick which one below. Walking back the same trail?`,
+      "I'll hike back the same way", () => {
+        setDist("up-miles", r.miles);
+        setElev("up-gain", r.gainFt);
+        setElev("back-gain", hasEle ? r.outAndBackGainFt - r.gainFt : "");
+        $("ending").value = "outback";
+        updateForm();
+        return "✓ Set to hike back the same way.";
+      }));
+  }
+  if (!r.isLoop && source === "map") {
+    status.appendChild(choiceNote("Set as there and back on the same trail. Ending somewhere else, like a shuttle or a car?",
+      "It ends somewhere else", () => {
+        setDist("up-miles", hasEle ? r.topMiles : r.miles);
+        setElev("up-gain", r.topGainFt);
+        setDist("back-miles", hasEle ? Math.round((r.miles - r.topMiles) * 10) / 10 : 0);
+        setElev("back-gain", hasEle ? Math.max(0, r.gainFt - r.topGainFt) : "");
+        $("ending").value = "oneway";
+        updateForm();
+        return "✓ Set to end somewhere else. Pick what's at the end below.";
+      }));
+  }
+  return r;
+}
+
+function choiceNote(text, label, onClick) {
+  const note = document.createElement("div");
+  note.className = "muted note";
+  note.textContent = text + " ";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "secondary small-btn";
+  btn.textContent = label;
+  btn.addEventListener("click", () => { note.textContent = onClick(); });
+  note.appendChild(btn);
+  return note;
+}
+
+function showRouteCard(r) {
+  const card = $("route-card");
+  card.hidden = false;
+  const oneWay = r.source === "map" && !r.isLoop;
+  card.innerHTML = `
+    <div class="route-stats">
+      <div><span>📏</span><b>${U.dist(r.miles)}</b><small>${oneWay ? "one way" : r.isLoop ? "loop" : "total"}</small></div>
+      <div><span>⛰️</span><b>${r.gainFt !== null ? U.elev(r.gainFt) : "?"}</b><small>climb</small></div>
+      <div><span>🏔️</span><b>${r.highFt !== null ? U.elevExact(r.highFt) : "?"}</b><small>highest</small></div>
+    </div>
+    ${miniProfile(r.points)}
+    <p class="small muted">${r.source === "map" ? "Measured from OpenStreetMap and free elevation data. Peaks can read a little low, so check it against your trail guide and change any number below." : "From your GPX file. Change any number below."}</p>`;
+  card.classList.remove("pop");
+  void card.offsetWidth; // restart the little pop animation
+  card.classList.add("pop");
+}
+
+// A small climb-shape drawing for the route card.
+function miniProfile(points) {
+  const ele = points.map((p) => p.ele).filter(Number.isFinite);
+  if (ele.length < 2) return "";
+  const lo = Math.min(...ele), hi = Math.max(...ele), W = 300, H = 56;
+  const step = Math.max(1, Math.floor(points.length / 80));
+  const pts = points.filter((p, i) => Number.isFinite(p.ele) && (i % step === 0 || i === points.length - 1));
+  const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * W).toFixed(1)},${(H - 4 - ((p.ele - lo) / Math.max(1, hi - lo)) * (H - 10)).toFixed(1)}`);
+  return `<svg class="mini-profile" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <path class="area" d="M0,${H} L${xy.join(" L")} L${W},${H} Z"/><path class="ln" d="M${xy.join(" L")}"/></svg>`;
 }
 
 $("gpx").addEventListener("change", async (e) => {
@@ -225,71 +399,22 @@ $("gpx").addEventListener("change", async (e) => {
   try {
     const { points, name } = readGpx(await file.text());
     if (points.length < 2) throw new Error("No route points");
-    const r = routeStats(points);
-    const setVal = (id, v) => { $(id).value = v ?? ""; };
-
-    // The way up = start to the highest point. The way back = the rest of the route.
-    setVal("up-miles", r.gainFt !== null ? r.topMiles : r.miles);
-    setVal("up-gain", r.topGainFt);
-    $("ending").value = r.isLoop ? "loop" : "oneway";
-    setVal("back-miles", r.gainFt !== null ? Math.round((r.miles - r.topMiles) * 10) / 10 : 0);
-    setVal("back-gain", r.gainFt !== null ? Math.max(0, r.gainFt - r.topGainFt) : "");
-    updateForm();
-    const spot = await describeSpot(r.start.lat, r.start.lon);
-    choosePlace({ name: name || "Route start", area: spot.area, region: spot.region, latitude: r.start.lat, longitude: r.start.lon, route: points,
-      elevFt: Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined });
-    $("place").value = name || "";
+    const spot = await describeSpot(points[0].lat, points[0].lon);
+    const r = applyRoute(points, { name, ...spot, source: "gpx" });
     track("gpx-import");
-
-    status.innerHTML = "";
-    const line = document.createElement("div");
-    line.textContent = `✓ Imported ${name ? `"${name}"` : "your route"}: ${r.miles} mi` +
-      (r.gainFt !== null
-        ? `, ${r.gainFt.toLocaleString()} ft of climbing. The top (${r.highFt.toLocaleString()} ft) is at mile ${r.topMiles}.`
-        : ". This file has no elevation, so please add the climb yourself.");
-    status.appendChild(line);
-    if (!r.isLoop) {
-      const note = document.createElement("div");
-      note.className = "muted";
-      note.textContent = `This route ends ${r.gapMiles} mi from where it starts, so I set the way back to a tram, shuttle or car. Pick which one below. If you'll walk back the same trail instead, tap here:`;
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "secondary";
-      btn.textContent = "I'll hike back the same way";
-      btn.addEventListener("click", () => {
-        // The whole route becomes the way out; every descent on the way out is a climb on the way back.
-        setVal("up-miles", r.miles);
-        setVal("up-gain", r.gainFt);
-        setVal("back-gain", r.gainFt !== null ? r.outAndBackGainFt - r.gainFt : "");
-        $("ending").value = "outback";
-        updateForm();
-        note.textContent = "✓ Set to hike back the same way.";
-      });
-      note.appendChild(document.createElement("br"));
-      note.appendChild(btn);
-      status.appendChild(note);
-    }
+    if (r.gainFt === null) status.prepend(Object.assign(document.createElement("div"), { textContent: "This file has no elevation, so please add the climb yourself." }));
     // A recorded hike (not just a planned route) has times, so it can teach us the hiker's pace.
     if (r.elapsedHours > 0.25 && r.gainFt !== null) {
       const useTop = r.topHours > 0.25 && r.topMiles > 0;
-      const rec = document.createElement("div");
-      rec.className = "muted";
-      rec.textContent = `This looks like a hike you recorded: ${useTop ? `${formatDuration(r.topHours)} to the top, ` : ""}${formatDuration(r.elapsedHours)} in total.`;
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "secondary";
-      btn.textContent = "Use this hike to learn my pace";
-      btn.addEventListener("click", () => {
-        setVal("past-miles", useTop ? r.topMiles : r.miles);
-        setVal("past-gain", useTop ? r.topGainFt : r.gainFt);
-        setVal("past-hours", Math.round((useTop ? r.topHours : r.elapsedHours) * 100) / 100);
-        $("pace").value = "custom";
-        saveMyPace(Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined);
-        rec.textContent = "✓ Saved as your pace. Now import or enter the hike you're planning.";
-      });
-      rec.appendChild(document.createElement("br"));
-      rec.appendChild(btn);
-      status.appendChild(rec);
+      status.appendChild(choiceNote(`This looks like a hike you recorded: ${useTop ? `${formatDuration(r.topHours)} to the top, ` : ""}${formatDuration(r.elapsedHours)} in total.`,
+        "Use this hike to learn my pace", () => {
+          setDist("past-miles", useTop ? r.topMiles : r.miles);
+          setElev("past-gain", useTop ? r.topGainFt : r.gainFt);
+          $("past-hours").value = Math.round((useTop ? r.topHours : r.elapsedHours) * 100) / 100;
+          setPace("custom");
+          saveMyPace(Number.isFinite(r.start.ele) ? Math.round(r.start.ele * 3.28084) : undefined);
+          return "✓ Saved as your pace. Now search or import the hike you're planning.";
+        }));
     }
   } catch {
     status.textContent = "Couldn't read that file. Make sure it's a .gpx route file (most hiking apps can export one).";
@@ -313,13 +438,13 @@ async function fetchForecast(place) {
 function readInputs() {
   const ending = $("ending").value;
   return {
-    upMiles: +$("up-miles").value,
-    upGainFt: +$("up-gain").value || 0,
-    trailheadFt: $("trailhead-elev").value === "" ? null : +$("trailhead-elev").value,
+    upMiles: readDist("up-miles"),
+    upGainFt: readElev("up-gain") || 0,
+    trailheadFt: readElev("trailhead-elev"),
     ending,
     endType: $("end-type").value,
-    backMiles: ending === "outback" ? 0 : +$("back-miles").value || 0,
-    backGainFt: +$("back-gain").value || 0,
+    backMiles: ending === "outback" ? 0 : readDist("back-miles"),
+    backGainFt: readElev("back-gain") || 0,
     lastDeparture: ending === "oneway" && $("end-type").value !== "car" ? $("last-time").value : "",
     date: $("date").value,
     time: $("time").value,
@@ -357,36 +482,77 @@ function updateForm() {
   $("back-miles-wrap").hidden = i.ending === "outback";
   $("last-time-wrap").hidden = i.ending !== "oneway" || i.endType === "car";
   $("cooking-wrap").hidden = i.nights === 0;
-  $("back-miles-label").textContent = i.ending === "loop" ? "Miles from the top back to the start" : `Miles from the top to the ${endName(i)}`;
+  const d = U.metric() ? "Kilometers" : "Miles";
+  $("back-miles-label").textContent = i.ending === "loop" ? `${d} from the top back to the start` : `${d} from the top to the ${endName(i)}`;
   if (!i.upMiles) return ($("totals").textContent = "");
   const total = i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles);
-  $("totals").textContent = `Total: ${Math.round(total * 10) / 10} mi and ${(i.upGainFt + i.backGainFt).toLocaleString()} ft of climbing`;
+  $("totals").textContent = `Total: ${U.dist(total)} and ${U.elev(i.upGainFt + i.backGainFt)} of climbing`;
 }
 
-// ---------- Your own pace ----------
-// Learned from the way up of a hike the person already did, and kept only on this device.
-const PACE_KEY = "trailprep.myPace";
+// ---------- Your pace ----------
+// Three ready-made paces as tappable cards, each showing what it means on a typical hike,
+// plus "your own", learned from a hike the person already did and kept only on this device.
+const PACE_KEY = "trailprep.myPace"; // old name on purpose: keeps a pace saved before the rename
 function loadMyPace() {
   try { return JSON.parse(localStorage.getItem(PACE_KEY)); } catch { return null; }
 }
 
+const sampleText = (factor) => {
+  const s = sampleHike(factor);
+  return `${formatDuration(s.best)}–${formatDuration(s.worst)} for ${U.dist(s.miles, 0)} with ${U.elev(s.gainFt)} up`;
+};
+
+function renderPaceCards() {
+  const current = $("pace").value;
+  $("pace-cards").innerHTML = ["relaxed", "average", "fast", "custom"].map((k) => {
+    const p = PACES[k];
+    const sub = k === "custom" ? (loadMyPace() ? "Learned from your hike" : "From a hike you did") : sampleText(p.factor);
+    return `<button type="button" role="radio" class="pace-card" data-pace="${k}" aria-checked="${k === current}">
+      <span class="p-emoji" aria-hidden="true">${p.emoji}</span><b>${p.label}</b><small>${sub}</small></button>`;
+  }).join("");
+}
+
+function setPace(k) {
+  $("pace").value = k;
+  document.querySelectorAll(".pace-card").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.pace === k)));
+  showPace();
+}
+
+$("pace-cards").addEventListener("click", (e) => {
+  const b = e.target.closest(".pace-card");
+  if (!b) return;
+  setPace(b.dataset.pace);
+  b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump");
+  navigator.vibrate?.(8);
+  track(`pace-${b.dataset.pace}`);
+});
+
 function saveMyPace(elevFt) {
-  const miles = +$("past-miles").value, gainFt = +$("past-gain").value || 0, hours = +$("past-hours").value;
+  const miles = readDist("past-miles"), gainFt = readElev("past-gain") || 0, hours = +$("past-hours").value;
   if (!miles || !hours) {
-    $("past-result").textContent = "Add the miles to the top and how long it took.";
+    $("past-result").textContent = "Add the distance to the top and how long it took.";
     return;
   }
   // elevFt: where the climb started, when we know it (from a GPX), so altitude can be taken into account.
   try { localStorage.setItem(PACE_KEY, JSON.stringify({ miles, gainFt, hours, elevFt: typeof elevFt === "number" ? elevFt : undefined })); } catch {}
   track("pace-saved");
+  renderPaceCards();
   showPace();
+  renderSettings();
+}
+
+function myPaceSummary(mine) {
+  const factor = paceFactor({ ref: mine });
+  const pct = Math.round((factor / PACES.average.factor - 1) * 100);
+  const vsAverage = Math.abs(pct) < 5 ? "about the same as Average" : pct > 0 ? `${pct}% slower than Average` : `${-pct}% faster than Average`;
+  return { factor, text: `${describePace(factor)} (${vsAverage}).` };
 }
 
 function showPace() {
   const pace = $("pace").value, mine = loadMyPace();
   $("my-pace").hidden = pace !== "custom";
   if (pace !== "custom") {
-    $("pace-desc").textContent = `${PACES[pace].label} means ${describePace(PACES[pace].factor)}.`;
+    $("pace-desc").textContent = `${PACES[pace].label}: ${describePace(PACES[pace].factor)}. ${PACES[pace].who}`;
     return;
   }
   if (!mine) {
@@ -394,45 +560,72 @@ function showPace() {
     $("past-result").textContent = "";
     return;
   }
-  const factor = paceFactor({ ref: mine });
-  const pct = Math.round((factor - 1) * 100);
-  const vsAverage = Math.abs(pct) < 5 ? "about average" : pct > 0 ? `${pct}% slower than average` : `${-pct}% faster than average`;
-  $("pace-desc").textContent = `Your pace: ${describePace(factor)} (${vsAverage}). On hikes much longer than this one, hikepace adds time for getting tired.`;
-  $("past-result").textContent = `✓ Learned from your climb of ${mine.miles} mi and ${mine.gainFt.toLocaleString()} ft in ${formatDuration(mine.hours)}.`;
-  $("past-miles").value ||= mine.miles;
-  $("past-gain").value ||= mine.gainFt;
+  $("pace-desc").textContent = `Your pace: ${myPaceSummary(mine).text} On hikes much longer than this one, hikepace adds time for getting tired.`;
+  $("past-result").textContent = `✓ Learned from your climb of ${U.dist(mine.miles)} and ${U.elev(mine.gainFt)} in ${formatDuration(mine.hours)}.`;
+  if ($("past-miles").value === "") setDist("past-miles", mine.miles);
+  if ($("past-gain").value === "") setElev("past-gain", mine.gainFt);
   $("past-hours").value ||= mine.hours;
 }
 
-$("pace").addEventListener("change", showPace);
 $("past-save").addEventListener("click", () => saveMyPace());
 
+// ---------- Settings ----------
+function renderSettings() {
+  $("pace-explain").innerHTML = ["relaxed", "average", "fast"].map((k) => {
+    const p = PACES[k];
+    return `<div class="explain"><div class="explain-head"><span aria-hidden="true">${p.emoji}</span><b>${p.label}</b></div>
+      <p class="small">${p.who}</p>
+      <p class="small muted">${describePace(p.factor)[0].toUpperCase() + describePace(p.factor).slice(1)}.</p>
+      <p class="small"><b>Example:</b> ${sampleText(p.factor)} (there and back). The first time is "if you keep your pace", the second "if you get tired".</p></div>`;
+  }).join("");
+  const mine = loadMyPace();
+  $("my-pace-status").textContent = mine
+    ? `Saved: ${myPaceSummary(mine).text} Learned from ${U.dist(mine.miles)} and ${U.elev(mine.gainFt)} in ${formatDuration(mine.hours)}.`
+    : "Not set yet. Pick \"Your own\" under Your pace and enter a hike you did, or use a recorded GPX file.";
+}
+
+$("settings-btn").addEventListener("click", () => { renderSettings(); $("settings").showModal(); track("settings"); });
+$("settings").addEventListener("click", (e) => {
+  if (e.target.closest("[data-close]") || e.target === $("settings")) $("settings").close(); // tap outside closes it
+  const u = e.target.closest("[data-units]")?.dataset.units;
+  if (u) switchUnits(u);
+});
+$("units-btn").addEventListener("click", () => switchUnits(U.metric() ? "imperial" : "metric"));
+$("clear-data").addEventListener("click", () => {
+  if (!confirm("Delete your saved trips and your pace from this phone?")) return;
+  try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(PACE_KEY); } catch {}
+  renderSaved(); renderPaceCards(); showPace(); renderSettings();
+});
+
+// ---------- Plan ----------
 $("plan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!state.place) return showError("Pick a trailhead location first (search, coordinates, or use my location).");
+  if (!state.place) return showError("Pick where you're hiking first: search a trail, use a GPX file, or tap Near me.");
   const inputs = readInputs();
-  if (!inputs.upMiles || !inputs.date || !inputs.time) return showError("Add the miles to the top, the date and the start time.");
-  if (inputs.ending !== "outback" && !inputs.backMiles) return showError(inputs.ending === "loop" ? "Add the miles from the top back to the start." : `Add the miles from the top to the ${endName(inputs)}.`);
+  if (!inputs.upMiles || !inputs.date || !inputs.time) return showError("Add the distance to the top, the date and the start time.");
+  if (inputs.ending !== "outback" && !inputs.backMiles) return showError(inputs.ending === "loop" ? "Add the distance from the top back to the start." : `Add the distance from the top to the ${endName(inputs)}.`);
   if (inputs.pace === "custom" && !inputs.paceRef) return showError("Save your pace first (enter a past climb under \"Teach hikepace your pace\"), or pick another pace.");
   $("plan-btn").disabled = true;
-  $("plan-btn").textContent = "Getting the forecast…";
+  $("plan-btn").textContent = "Checking the sky… ☁️";
   try {
     state.forecast = await fetchForecast(state.place);
     track(inputs.nights ? "plan-backpacking" : "plan-day-hike");
     track(`region-${state.place.region}`, `Planned in ${state.place.region}`);
     state.inputs = inputs;
+    state.savedName = null;
     render();
   } catch {
     showError("Could not get the forecast. If you're offline, open a saved trip below.");
   } finally {
     $("plan-btn").disabled = false;
-    $("plan-btn").textContent = "Plan my hike";
+    $("plan-btn").textContent = "Plan my hike 🥾";
   }
 });
 
 function showError(msg) {
   $("results").hidden = false;
   $("results").innerHTML = `<div class="alert danger">${msg}</div>`;
+  $("results").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // ---------- Build the plan ----------
@@ -440,7 +633,7 @@ function buildPlan(rawInputs, forecast) {
   const inputs = normalizeInputs(rawInputs);
   const start = parseLocal(`${inputs.date}T${inputs.time}`);
   const days = inputs.nights + 1;
-  // Trailhead elevation: from the GPX when we have it, otherwise the weather service's estimate for that spot.
+  // Trailhead elevation: from the route when we have it, otherwise the weather service's estimate for that spot.
   const trailheadFt = inputs.trailheadFt ?? (Number.isFinite(forecast.elevation) ? Math.round(forecast.elevation * 3.28084) : 0);
   const est = estimateHike({ ...inputs, pace: makePace(inputs), heavyPack: inputs.nights > 0, days, trailheadFt });
 
@@ -529,7 +722,7 @@ function buildPlan(rawInputs, forecast) {
 }
 
 // ---------- Show the plan ----------
-function render(savedName) {
+function render(savedName, { quiet = false } = {}) {
   const { forecast, place } = state;
   const p = buildPlan(state.inputs, forecast);
   const inputs = p.inputs ?? state.inputs;
@@ -538,51 +731,49 @@ function render(savedName) {
   if (p.error) return (out.innerHTML = `<div class="alert warn">${p.error}</div>`);
 
   const perDay = p.days > 1 ? " per day" : "";
+  const paceLabel = inputs.pace === "custom" ? "your own" : PACES[inputs.pace].label;
   out.innerHTML = `
-    <div class="summary-head">
-      <div>
-        <h2>${place.name}</h2>
-        <p class="muted">${fmtDay(p.start)} · ${p.est.totalMiles} mi · ${p.est.totalGainFt.toLocaleString()} ft of climbing · ${inputs.ending === "oneway" ? `ends at a ${endName(inputs)}` : ENDINGS[inputs.ending]} · ${PACES[inputs.pace].label} pace${inputs.nights ? ` · ${inputs.nights} night${inputs.nights > 1 ? "s" : ""}` : ""}</p>
-        ${savedName ? `<p class="muted">Saved plan · forecast from ${savedName}</p>` : ""}
-      </div>
-      <div class="actions no-print">
-        <button type="button" id="save-btn">Save for offline</button>
-        <button type="button" id="print-btn" class="secondary">Print / PDF</button>
-      </div>
+    <div class="result-hero">
+      <p class="eyebrow">${fmtDay(p.start)} · ${paceLabel} pace${inputs.nights ? ` · ${inputs.nights} night${inputs.nights > 1 ? "s" : ""}` : ""}</p>
+      <h2>${esc(place.name)}</h2>
+      <p class="muted">${U.dist(p.est.totalMiles)} · ${U.elev(p.est.totalGainFt)} of climbing · ${inputs.ending === "oneway" ? `ends at a ${endName(inputs)}` : ENDINGS[inputs.ending]}</p>
+      ${savedName ? `<p class="muted small">Saved plan · forecast from ${esc(savedName)}</p>` : ""}
+      <div class="big-time"><span class="count" data-to="${p.est.finish.best}">${formatDuration(p.est.finish.best)}</span> – ${formatDuration(p.est.finish.worst)}<small>on the trail${perDay}, breaks included</small></div>
+      ${daylightBar(p)}
     </div>
 
     ${p.alerts.map((a) => `<div class="alert ${a.level}">${a.text}</div>`).join("")}
     ${rideAlert(p)}
 
     <div class="cards">
-      <div class="card"><div class="label">Time on trail${perDay}</div><div class="big">${formatDuration(p.est.finish.best)} – ${formatDuration(p.est.finish.worst)}</div>
-        <div class="small">If you keep your pace – if you get tired. Breaks included.</div></div>
-      <div class="card"><div class="label">Water</div><div class="big">${p.water.total[0]}–${p.water.total[1]} L</div>
+      <div class="card"><div class="c-emoji" aria-hidden="true">💧</div><div class="label">Water</div><div class="big">${p.water.total[0]}–${p.water.total[1]} L</div>
         <div class="small">${inputs.nights
-          ? `Hiking: ${p.water.hike[0]}–${p.water.hike[1]} L · At camp: ${p.water.camp[0]}–${p.water.camp[1]} L for ${w_cook(p)}. Carry only what you need between water sources you can filter.`
+          ? `Hiking: ${p.water.hike[0]}–${p.water.hike[1]} L · At camp: ${p.water.camp[0]}–${p.water.camp[1]} L for ${p.w.cooking ? "drinking and cooking" : "drinking"}. Carry only what you need between water sources you can filter.`
           : "To drink while hiking. Carry the high end if it's hot or you're unsure."}</div></div>
-      <div class="card"><div class="label">Food to pack</div>
+      <div class="card"><div class="c-emoji" aria-hidden="true">🍫</div><div class="label">Food to pack</div>
         <div class="big">${p.food.total[0].toLocaleString()}–${p.food.total[1].toLocaleString()} cal</div>
         <div class="small">${inputs.nights
-          ? `Trail snacks: ${p.food.snacks[0].toLocaleString()}–${p.food.snacks[1].toLocaleString()} · Dinner and breakfast: ${p.food.meals[0].toLocaleString()}–${p.food.meals[1].toLocaleString()}. About ${p.food.pounds[0]}–${p.food.pounds[1]} lb.`
+          ? `Trail snacks: ${p.food.snacks[0].toLocaleString()}–${p.food.snacks[1].toLocaleString()} · Dinner and breakfast: ${p.food.meals[0].toLocaleString()}–${p.food.meals[1].toLocaleString()}. About ${U.weight(p.food.pounds[0])}–${U.weight(p.food.pounds[1])}.`
           : "Snacks: about 200–300 calories for every hour on the trail."}</div></div>
     </div>
 
     <h3>Your day</h3>
     <ul class="timeline">
-      <li><span>You start</span><b>${fmtTime(p.start)}</b></li>
-      ${p.days === 1 ? `<li><span>Reach the top</span><b>${fmtRange(p.top)}</b></li>` : ""}
-      <li><span>${p.days > 1 ? "Reach camp (each day)" : inputs.ending === "oneway" ? `Reach the ${endName(inputs)}` : "Back at the start"}</span><b>${fmtRange(p.finish)}</b></li>
-      <li><span>Sunset</span><b>${fmtTime(p.first.sunset)}</b></li>
+      <li><span>🚶 You start</span><b>${fmtTime(p.start)}</b></li>
+      ${p.days === 1 ? `<li><span>🏔️ Reach the top</span><b>${fmtRange(p.top)}</b></li>` : ""}
+      <li><span>${p.days > 1 ? "⛺ Reach camp (each day)" : inputs.ending === "oneway" ? `🚌 Reach the ${endName(inputs)}` : "🏁 Back at the start"}</span><b>${fmtRange(p.finish)}</b></li>
+      <li><span>🌅 Sunset</span><b>${fmtTime(p.first.sunset)}</b></li>
       ${p.ride?.last ? `<li><span>Last ${p.ride.name} leaves</span><b>${fmtTime(p.ride.last)}</b></li>` : ""}
-      ${p.light.startsInDark ? `<li><span>Sunrise</span><b>${fmtTime(p.first.sunrise)}</b></li>` : ""}
+      ${p.light.startsInDark ? `<li><span>🌄 Sunrise</span><b>${fmtTime(p.first.sunrise)}</b></li>` : ""}
       ${p.light.latestStart < parseLocal(`${inputs.date}T00:00`)
         ? `<li class="hint"><span>This hike is longer than the daylight. Plan to hike part of it in the dark, with a charged headlamp.</span><b></b></li>`
         : `<li class="hint"><span>Latest start to finish 30 min before sunset, even if you get tired</span><b>${fmtTime(p.light.latestStart)}</b></li>`}
     </ul>
-    <p class="range-note">Each range runs from "if you keep your pace" to "if you get tired." Long days have wider ranges because people slow down more as the day goes on.${p.est.altitudeSlowdown ? ` This hike is high up (trailhead about ${p.trailheadFt.toLocaleString()} ft), so times include about ${p.est.altitudeSlowdown}% extra for thinner air.` : ""}</p>
+    <p class="range-note">Each range runs from "if you keep your pace" to "if you get tired." Real hikers' times change up to about 30% from one day to the next (heat, breaks, how you feel), so plan around the later time.${p.est.altitudeSlowdown ? ` This hike is high up (trailhead about ${U.elev(p.trailheadFt)}), so times include about ${p.est.altitudeSlowdown}% extra for thinner air.` : ""}</p>
     ${p.days === 1 ? `<p class="no-print">Want sunrise from the top? Start by <b>${fmtTime(p.light.sunriseAtTopStart)}</b> (sunrise is ${fmtTime(p.first.sunrise)}).
       <button type="button" id="sunrise-btn" class="link">Use this start time</button></p>` : ""}
+
+    ${state.route ? profileChart(p, inputs) : ""}
 
     <div id="camp-box"></div>
 
@@ -592,12 +783,19 @@ function render(savedName) {
     <h3>Pack list for these conditions</h3>
     ${gearList(p.gear)}
 
-    <p class="disclaimer">All estimates are a rough guide based on standard hiking rules of thumb and the forecast. Weather in the mountains changes fast. Check official sources (NWS, park and forest offices) and turn back if conditions change.</p>`;
+    <div class="actions no-print">
+      <button type="button" id="save-btn">💾 Save for offline</button>
+      <button type="button" id="share-btn" class="secondary">Share</button>
+      <button type="button" id="print-btn" class="secondary">Print / PDF</button>
+    </div>
+    <p class="disclaimer">All estimates are a rough guide based on standard hiking rules of thumb, real recorded hikes and the forecast. Weather in the mountains changes fast. Check official sources (weather service, park offices) and turn back if conditions change.</p>`;
 
   if (p.days === 1) wireChart(p);
+  if (state.route) wireProfile(p, inputs);
   fillCampBox(p, inputs);
   $("save-btn").addEventListener("click", saveTrip);
   $("print-btn").addEventListener("click", () => { track("print"); window.print(); });
+  $("share-btn").addEventListener("click", () => shareTrip(p, inputs));
   $("sunrise-btn")?.addEventListener("click", () => {
     track("sunrise-start");
     const t = p.light.sunriseAtTopStart;
@@ -606,50 +804,132 @@ function render(savedName) {
     $("time").value = state.inputs.time;
     render(savedName);
   });
-  out.scrollIntoView({ behavior: "smooth" });
+  // gear checkboxes: a little tick sound-free "pop" and a counter of what's packed
+  out.querySelectorAll(".gear input").forEach((c) => c.addEventListener("change", () => {
+    const all = out.querySelectorAll(".gear input"), done = out.querySelectorAll(".gear input:checked").length;
+    $("packed").textContent = done === all.length ? "All packed! 🎒✨" : `${done} of ${all.length} packed`;
+    if (done === all.length) celebrate("Ready to go! 🎒");
+    navigator.vibrate?.(6);
+  }));
+  if (!quiet) {
+    out.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
+    countUp(out.querySelector(".count"));
+    if (!savedName) celebrate(p.alerts.some((a) => a.level === "danger") ? "Plan ready. Read the warnings ⚠️" : "Your plan is ready! 🥾");
+  }
+}
+
+// Sun bar: the day from dark to dark, with when you start, reach the top and finish, and a little
+// hiker that walks from your start to your finish.
+function daylightBar(p) {
+  if (p.days > 1) return "";
+  const from = Math.min(p.start, p.first.sunrise) - 3600e3, to = Math.max(p.finish.worst, p.first.sunset) + 3600e3;
+  const pct = (d) => ((d - from) / (to - from)) * 100;
+  const band = (r, cls, label) => `<div class="band ${cls}" style="left:${pct(r.best)}%;width:${Math.max(1, pct(r.worst) - pct(r.best))}%" title="${label} ${fmtRange(r)}"></div>`;
+  return `<div class="sunbar" role="img" aria-label="Daylight from sunrise ${fmtTime(p.first.sunrise)} to sunset ${fmtTime(p.first.sunset)}; you finish ${fmtBetween(p.finish)}">
+    <div class="sky" style="--rise:${pct(p.first.sunrise)}%;--set:${pct(p.first.sunset)}%"></div>
+    ${band(p.top, "top-band", "Top")}
+    ${band(p.finish, "finish-band", "Finish")}
+    <div class="pin sun" style="left:${pct(p.first.sunset)}%"><span>🌅</span></div>
+    <div class="walker" style="--from:${pct(p.start)}%;--to:${pct(p.finish.best)}%"><span>🥾</span></div>
+    <div class="sunbar-labels"><span style="left:${pct(p.start)}%">Start ${fmtTime(p.start)}</span><span style="left:${pct(p.first.sunset)}%">Sunset ${fmtTime(p.first.sunset)}</span></div>
+  </div>
+  <div class="sunbar-key small muted"><span><i class="k top-band"></i>Reach the top</span><span><i class="k finish-band"></i>Finish</span><span><i class="k night"></i>Dark</span></div>`;
+}
+
+// Climb chart: the trail's height along the way. Slide a finger along it to see how high you are
+// and when you'd get there at your pace. Water and campsites pop up on it once they load.
+function profileChart(p, inputs) {
+  return `<h3>The climb</h3>
+    <div class="profile" id="profile">
+      <svg role="img" aria-label="Trail elevation along the route"></svg>
+      <div class="tip" id="pf-tip" hidden></div>
+      <p class="small muted">Slide your finger along the trail to see when you'd be there. ${inputs.ending === "outback" ? "This is the way out; you come back the same way." : ""}</p>
+    </div>`;
+}
+
+function profileModel(p, inputs) {
+  const pts = state.route;
+  const trackPts = routeEffort(pts);
+  const slow = (inputs.nights > 0 ? 1.15 : 1) * (1 + p.est.altitudeSlowdown / 100);
+  const pace = makePace(inputs);
+  const ele = pts.map((x) => (Number.isFinite(x.ele) ? x.ele * 3.28084 : null));
+  const known = ele.filter((x) => x !== null);
+  return { pts, trackPts, slow, pace, ele, lo: Math.min(...known), hi: Math.max(...known), total: trackPts[trackPts.length - 1].mile };
+}
+
+function wireProfile(p, inputs) {
+  const box = $("profile");
+  if (!box) return;
+  const m = profileModel(p, inputs);
+  if (!Number.isFinite(m.lo)) { box.innerHTML = `<p class="small muted">This route has no elevation.</p>`; return; }
+  // Drawn at the real width of the screen, so text and lines never get stretched.
+  const W = Math.max(280, Math.round(box.clientWidth)), H = 200, T = 30, B = 24, L = 8, R = 8;
+  const span = Math.max(30, m.hi - m.lo);
+  const x = (mi) => L + (mi / m.total) * (W - L - R);
+  const y = (ft) => T + (1 - (ft - m.lo) / span) * (H - T - B);
+  const step = Math.max(1, Math.floor(m.pts.length / 220));
+  const idx = m.pts.map((_, i) => i).filter((i) => m.ele[i] !== null && (i % step === 0 || i === m.pts.length - 1));
+  const line = idx.map((i) => `${x(m.trackPts[i].mile).toFixed(1)},${y(m.ele[i]).toFixed(1)}`);
+  const svg = box.querySelector("svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const topI = idx.reduce((a, i) => (m.ele[i] > m.ele[a] ? i : a), idx[0]);
+  svg.innerHTML = `
+    <defs><linearGradient id="pf-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--brand)" stop-opacity=".45"/><stop offset="1" stop-color="var(--brand)" stop-opacity=".05"/></linearGradient></defs>
+    <path class="pf-area" d="M${x(0)},${H - B} L${line.join(" L")} L${x(m.total)},${H - B} Z" fill="url(#pf-fill)"/>
+    <path class="pf-line" d="M${line.join(" L")}"/>
+    <text class="axis" x="${L}" y="${H - 6}">${U.metric() ? "0 km" : "0 mi"}</text>
+    <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${U.dist(m.total)}</text>
+    <text class="axis top-label" x="${Math.max(40, Math.min(W - 40, x(m.trackPts[topI].mile)))}" y="${Math.max(14, y(m.ele[topI]) - 10)}" text-anchor="middle">▲ ${U.elevExact(m.ele[topI])}</text>
+    <g id="pf-pins"></g>
+    <line id="pf-cross" class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
+    <circle id="pf-dot" class="dot s1" r="5" visibility="hidden"/>
+    <rect class="hit" x="0" y="0" width="${W}" height="${H}"/>`;
+  // draw-in animation
+  const pl = svg.querySelector(".pf-line");
+  if (!reduceMotion() && pl.getTotalLength) {
+    const len = pl.getTotalLength();
+    pl.style.strokeDasharray = len; pl.style.strokeDashoffset = len;
+    requestAnimationFrame(() => { pl.style.transition = "stroke-dashoffset 1.2s ease"; pl.style.strokeDashoffset = 0; });
+  }
+  state.profile = { x, y, m, H, B };
+  const tip = $("pf-tip"), cross = $("pf-cross"), dot = $("pf-dot");
+  const show = (e) => {
+    const r = svg.getBoundingClientRect();
+    const mi = Math.max(0, Math.min(m.total, (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * m.total));
+    let i = m.trackPts.findIndex((t) => t.mile >= mi);
+    if (i < 0) i = m.trackPts.length - 1;
+    const e2 = m.ele[i] ?? m.lo;
+    const eta = timeRange(m.trackPts[i].effort * m.slow, m.pace);
+    cross.setAttribute("x1", x(m.trackPts[i].mile)); cross.setAttribute("x2", x(m.trackPts[i].mile)); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(m.trackPts[i].mile)); dot.setAttribute("cy", y(e2)); dot.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    tip.innerHTML = `<div class="tip-head">${atMile(m.trackPts[i].mile)} · ${U.elevExact(e2)}</div><b>${fmtRange({ best: addHours(p.start, eta.best), worst: addHours(p.start, eta.worst) })}</b> you'd be here`;
+    tip.style.left = `${Math.min(Math.max(((x(m.trackPts[i].mile) / W) * r.width) - 80, 0), r.width - 170)}px`;
+    tip.style.top = `${Math.min(y(e2) + 18, H - 70)}px`;
+  };
+  const hide = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", hide);
+}
+
+// Water drops and tents on the climb chart.
+function pinProfile(items) {
+  const g = $("pf-pins"), pf = state.profile;
+  if (!g || !pf) return;
+  g.innerHTML = items.map((it, k) => {
+    let i = pf.m.trackPts.findIndex((t) => t.mile >= it.mile);
+    if (i < 0) i = pf.m.trackPts.length - 1;
+    const cx = pf.x(pf.m.trackPts[i].mile), cy = pf.y(pf.m.ele[i] ?? pf.m.lo);
+    return `<text class="pin-emoji" x="${cx}" y="${cy - 6}" text-anchor="middle" style="animation-delay:${k * 60}ms">${it.icon}<title>${esc(it.label)}</title></text>`;
+  }).join("");
 }
 
 // ---------- Where to camp and where to find water ----------
-// Campsites, springs and taps come from small files in data/places/ (built from OpenStreetMap and
-// Recreation.gov by tools/build-places.mjs). Each file covers a half-degree square, so the phone
-// only downloads the area around the hike.
-const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-let placeIndex = null;
-const tileCache = new Map();
-async function placesAround(minLat, minLon, maxLat, maxLon) {
-  placeIndex ??= await fetch("data/places/index.json").then((r) => r.json()).catch(() => ({ tiles: [], tile: 0.5 }));
-  const t = placeIndex.tile, have = new Set(placeIndex.tiles);
-  const rows = [];
-  for (let la = Math.floor(minLat / t) * t; la <= maxLat; la += t) {
-    for (let lo = Math.floor(minLon / t) * t; lo <= maxLon; lo += t) {
-      const key = `${la.toFixed(1)}_${lo.toFixed(1)}`;
-      if (!have.has(key)) continue;
-      if (!tileCache.has(key)) tileCache.set(key, fetch(`data/places/${key}.json`).then((r) => r.json()).catch(() => []));
-      rows.push(...(await tileCache.get(key)));
-    }
-  }
-  return rows;
-}
-
-// Who manages the land at a spot, from the Bureau of Land Management's free land map.
-// Returns an agency code like "BLM", "USFS", "NPS" (see campRules in calc.js), or null if it can't tell.
-const landCache = new Map();
-async function landAt(lat, lon) {
-  const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
-  if (!landCache.has(key)) {
-    const url = "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/identify?" + new URLSearchParams({
-      geometry: `${lon},${lat}`, geometryType: "esriGeometryPoint", sr: "4326", layers: "all:1", tolerance: "1",
-      mapExtent: `${lon - 1},${lat - 1},${lon + 1},${lat + 1}`, imageDisplay: "600,600,96", returnGeometry: "false", f: "json",
-    });
-    landCache.set(key, fetch(url).then((r) => r.json()).then((d) => d.results?.[0]?.attributes?.ADMIN_AGENCY_CODE || null).catch(() => null));
-  }
-  return landCache.get(key);
-}
-
 const CAMP_KIND = (c) => c.kind === "ground" ? "Campground" : c.flags.includes("p") ? "Tent spot" : c.flags.includes("b") ? "Backcountry site" : "Campsite";
 const mapLink = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
-const waterText = (w) => w ? `${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` (${esc(w.name)})` : ""} ${w.d < 0.1 ? "right there" : `${round1(w.d)} mi away`}${w.kind === "spring" && !w.drinkable ? ", filter it" : ""}` : "No mapped water within a mile";
-const round1 = (x) => Math.round(x * 10) / 10;
+const waterText = (w) => w ? `${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` (${esc(w.name)})` : ""} ${w.d < 0.1 ? "right there" : `${U.dist(w.d)} away`}${w.kind === "spring" && !w.drinkable ? ", filter it" : ""}` : `No mapped water within ${U.dist(1, 1)}`;
+const inUS = () => !state.place?.country || state.place.country === "US";
 
 async function fillCampBox(p, inputs) {
   const box = $("camp-box");
@@ -658,34 +938,38 @@ async function fillCampBox(p, inputs) {
   const backpacking = inputs.nights > 0;
   if (!route && !backpacking) return; // a day hike without a route: nothing to add
 
-  box.innerHTML = `<p class="muted small">Looking for ${backpacking ? "campsites and " : ""}water near your route…</p>`;
-  // The area to load: around the route, or 10 miles around the trailhead.
+  box.innerHTML = `<p class="muted small loading"><span class="spinner" aria-hidden="true"></span> Looking for ${backpacking ? "campsites and " : ""}water near your trail…</p>`;
+  // The area to load: around the route, or about 15 km around the trailhead.
   const pts = route || [{ lat: state.place.lat, lon: state.place.lon }];
-  const pad = route ? 0.05 : 0.15;
+  const pad = route ? 0.03 : 0.12;
   const lats = pts.map((x) => x.lat), lons = pts.map((x) => x.lon);
-  const places = await placesAround(Math.min(...lats) - pad, Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad);
+  const { rows: places, source } = await placesAround(Math.min(...lats) - pad, Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad);
   if ($("camp-box") !== box) return; // the plan changed while loading
-  if (!places.length) {
-    box.innerHTML = `<h3>${backpacking ? "Where to camp" : "Water on the way"}</h3><p class="muted">Campsite and water data covers ${esc((placeIndex?.states || ["Arizona"]).join(", ").replace("AZ", "Arizona"))} for now. More places are coming.</p>`;
+  if (source === "none") {
+    box.innerHTML = `<h3>${backpacking ? "Where to camp" : "Water on the way"}</h3><p class="muted">No campsites or water are mapped near this trail on OpenStreetMap (or the map service is busy right now). Carry all your water, and check the park or local office for where you can camp.</p>`;
     return;
   }
 
   let html = "";
+  const pins = [];
   if (backpacking && route) {
     const slow = 1.15 * (1 + p.est.altitudeSlowdown / 100); // full pack and thin air, same as the rest of the plan
     const { camps, pick, cutoff, reach } = campsAlongRoute({ points: route, places, start: p.start, sunset: p.first.sunset, pace: makePace(inputs), slow });
     const shown = camps.filter((c) => c.status !== "late").slice(-8);
     const late = camps.filter((c) => c.status === "late").length;
-    html += `<h3>Where to camp tonight</h3>
-      <p class="small muted">Campsites within about a third of a mile of your route, at your pace. "Easy" means you get there at least 45 minutes before sunset (${fmtTime(p.first.sunset)}) to set up, even if you get tired.</p>`;
+    camps.forEach((c) => pins.push({ mile: c.mile, icon: c === pick ? "⭐" : "⛺", label: `${c.name || CAMP_KIND(c)} · ${atMile(c.mile)}` }));
+    html += `<h3>Where to camp tonight ⛺</h3>
+      <p class="small muted">Campsites within about ${U.dist(0.35)} of your trail, at your pace. "Easy" means you get there at least 45 minutes before sunset (${fmtTime(p.first.sunset)}) to set up, even if you get tired.</p>`;
     // Where you'll be when it's time to stop, even if you get tired (helps most when no campsite is mapped).
-    if (reach && !reach.end) {
-      html += `<div class="camp reach"><b>By ${fmtTime(cutoff)} you'll be around mile ${reach.mile}</b> <span class="muted">(even if you get tired)</span>
+    if (reach?.end) {
+      html += `<div class="camp reach"><b>You can reach the end of this trail before ${fmtTime(cutoff)}</b> <span class="muted">(set-up time, even if you get tired)</span></div>`;
+    } else if (reach) {
+      html += `<div class="camp reach"><b>By ${fmtTime(cutoff)} you'll be around ${atMile(reach.mile)}</b> <span class="muted">(even if you get tired)</span>
         <div class="small land" data-lat="${reach.lat}" data-lon="${reach.lon}" data-kind="spot"></div>
         <div class="small"><a href="${mapLink(reach.lat, reach.lon)}" target="_blank" rel="noopener">See it on the map</a></div></div>`;
     }
     if (!camps.length) {
-      html += `<p>No campsites are mapped near this route. Dispersed camping may still be allowed, so check the land where you plan to stop (above).</p>`;
+      html += `<p>No campsites are mapped near this trail. Wild or dispersed camping may still be allowed, so check the rules for where you plan to stop${reach && !reach.end ? " (above)" : ""}.</p>`;
     } else if (!shown.length) {
       html += `<div class="alert warn">You can't reach any mapped campsite before dark at your pace. Start earlier (set up by ${fmtTime(cutoff)}) or plan a shorter first day.</div>`;
     } else {
@@ -698,28 +982,32 @@ async function fillCampBox(p, inputs) {
     const near = places.filter((x) => x[2] === "camp" || x[2] === "ground")
       .map((x) => ({ lat: x[0], lon: x[1], kind: x[2], name: x[3], flags: x[4], ridbId: x[5], d: milesBetween({ lat: x[0], lon: x[1] }, state.place) }))
       .sort((a, b) => a.d - b.d).slice(0, 5);
-    html += `<h3>Campsites near the trailhead</h3>
-      <p class="small muted">Import your route (GPX) above to see which campsites you can reach before dark at your pace.</p>
-      <ul class="camp-list">${near.map((c) => `<li><div class="camp"><b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · ${round1(c.d)} mi away</span>
+    html += `<h3>Campsites near the trailhead ⛺</h3>
+      <p class="small muted">Search a trail (or use a GPX file) above to see which campsites you can reach before dark at your pace.</p>
+      ${near.length ? `<ul class="camp-list">${near.map((c) => `<li><div class="camp"><b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · ${U.dist(c.d)} away</span>
         <div class="small land" data-lat="${c.lat}" data-lon="${c.lon}" data-kind="${c.kind}"></div>
-        <div class="small"><a href="${mapLink(c.lat, c.lon)}" target="_blank" rel="noopener">Map</a>${c.ridbId ? ` · <a href="https://www.recreation.gov/camping/campgrounds/${c.ridbId}" target="_blank" rel="noopener">Book on Recreation.gov</a>` : ""}</div></div></li>`).join("")}</ul>`;
+        <div class="small"><a href="${mapLink(c.lat, c.lon)}" target="_blank" rel="noopener">Map</a>${c.ridbId ? ` · <a href="https://www.recreation.gov/camping/campgrounds/${c.ridbId}" target="_blank" rel="noopener">Book on Recreation.gov</a>` : ""}</div></div></li>`).join("")}</ul>` : `<p class="muted">No campsites mapped nearby.</p>`}`;
   }
 
   if (route) {
     const water = waterAlongRoute(route, places);
-    html += `<h3>Water on the way</h3>`;
+    water.forEach((w) => pins.push({ mile: w.mile, icon: "💧", label: `${w.kind === "spring" ? "Spring" : "Water"} · ${atMile(w.mile)}` }));
+    html += `<h3>Water on the way 💧</h3>`;
     html += water.length
-      ? `<ul class="water-list">${water.slice(0, 12).map((w) => `<li><span>Mile ${w.mile}</span> ${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` · ${esc(w.name)}` : ""}${w.offTrailMi >= 0.1 ? ` <span class="muted">(${w.offTrailMi} mi off trail)</span>` : ""}${w.kind === "spring" && !w.drinkable ? ` <span class="muted">· filter or treat</span>` : ""}</li>`).join("")}</ul>
-         <p class="small muted">Springs in the desert can be dry, especially in summer. Check recent trip reports, and carry enough to reach the next sure source.</p>`
-      : `<p class="muted">No mapped springs or taps within a quarter mile of this route. Carry all your water.</p>`;
+      ? `<ul class="water-list">${water.slice(0, 12).map((w) => `<li><span>${atMile(w.mile)}</span> ${w.kind === "spring" ? "Spring" : "Water tap"}${w.name ? ` · ${esc(w.name)}` : ""}${w.offTrailMi >= 0.1 ? ` <span class="muted">(${U.dist(w.offTrailMi)} off trail)</span>` : ""}${w.kind === "spring" && !w.drinkable ? ` <span class="muted">· filter or treat</span>` : ""}</li>`).join("")}</ul>
+         <p class="small muted">Springs can be dry, especially in summer or in the desert. Check recent trip reports, and carry enough to reach the next sure source.</p>`
+      : `<p class="muted">No mapped springs or taps within ${U.dist(0.25, 2)} of this trail. Carry all your water.</p>`;
   }
-  html += `<p class="small muted">Campsites and water: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors and Recreation.gov. Land: Bureau of Land Management. Rules change (fire bans, closures), so check with the land office before you go.</p>`;
+  html += `<p class="small muted">Campsites and water: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors${source === "files" ? " and Recreation.gov" : ""}.${inUS() ? " Land: Bureau of Land Management." : ""} Rules change (fire bans, closures), so check with the park or land office before you go.</p>`;
   box.innerHTML = html;
+  pinProfile(pins);
   track(backpacking ? "camps-shown" : "water-shown");
 
-  // Fill in "whose land is this?" for each campsite shown (a campground is always fine to camp at).
+  // "Whose land is this?" for each campsite shown (a campground is always fine to camp at). US only:
+  // the land map covers the United States; elsewhere rules depend on the country and the park.
   for (const el of box.querySelectorAll(".land")) {
     if (el.dataset.kind === "ground") { el.textContent = "Campground: camping allowed (may need a reservation)."; continue; }
+    if (!inUS()) { el.textContent = "Camping rules depend on the country and the park. Check with the local office."; el.classList.add("check"); continue; }
     el.textContent = "Checking whose land this is…";
     landAt(+el.dataset.lat, +el.dataset.lon).then((code) => {
       const r = campRules(code);
@@ -732,8 +1020,8 @@ async function fillCampBox(p, inputs) {
 function campCard(c, isPick) {
   const when = c.status === "easy" ? `Arrive ${fmtRange({ best: c.arriveBest, worst: c.arriveWorst })}` : `Only if you keep your pace: ${fmtTime(c.arriveBest)}`;
   return `<div class="camp${isPick ? " pick" : ""}">
-    ${isPick ? `<div class="label">Best pick</div>` : ""}
-    <b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · mile ${c.mile}${c.offTrailMi >= 0.1 ? ` (${c.offTrailMi} mi off trail)` : ""}</span>
+    ${isPick ? `<div class="label">⭐ Best pick</div>` : ""}
+    <b>${esc(c.name || CAMP_KIND(c))}</b> <span class="muted">· ${CAMP_KIND(c)} · ${atMile(c.mile)}${c.offTrailMi >= 0.1 ? ` (${U.dist(c.offTrailMi)} off trail)` : ""}</span>
     <span class="tag ${c.status}">${c.status === "easy" ? "Easy before dark" : "Tight"}</span>
     <div class="small">${when}</div>
     <div class="small">💧 ${waterText(c.water)}</div>
@@ -741,9 +1029,6 @@ function campCard(c, isPick) {
     <div class="small"><a href="${mapLink(c.lat, c.lon)}" target="_blank" rel="noopener">Map</a>${c.ridbId ? ` · <a href="https://www.recreation.gov/camping/campgrounds/${c.ridbId}" target="_blank" rel="noopener">Book on Recreation.gov</a>` : ""}</div>
   </div>`;
 }
-
-const fmtRange = (r) => `${fmtTime(r.best)} – ${fmtTime(r.worst)}`;
-const fmtBetween = (r) => `between ${fmtTime(r.best)} and ${fmtTime(r.worst)}`;
 
 function rideAlert(p) {
   if (!p.ride) return "";
@@ -754,8 +1039,6 @@ function rideAlert(p) {
   if (name === "car pickup") return `<div class="alert warn">Tell your ride you'll arrive ${fmtBetween(p.finish)}.</div>`;
   return `<div class="alert warn">Check when the last ${name} leaves and enter it above, so hikepace can warn you if you might miss it.</div>`;
 }
-
-const w_cook = (p) => (p.w.cooking ? "drinking and cooking" : "drinking");
 
 // Weather icon for a WMO code; a moon instead of a sun at night.
 function weatherIcon(code, night) {
@@ -777,14 +1060,16 @@ function weatherChart(p) {
   const W = 700, H = 230, L = 40, R = 16, T = 14, B = 30;
   const t0 = hrs[0].time.getTime(), t1 = hrs[hrs.length - 1].time.getTime();
   const x = (d) => L + ((d.getTime() - t0) / Math.max(1, t1 - t0)) * (W - L - R);
-  const tops = hrs.map((h) => tempAtTop(h.feels, climb));
-  let lo = Math.floor((Math.min(...tops, ...hrs.map((h) => h.feels)) - 4) / 10) * 10;
-  let hi = Math.ceil((Math.max(...hrs.map((h) => h.feels), ...tops) + 4) / 10) * 10;
-  if (hi - lo < 20) hi = lo + 20;
+  const base = hrs.map((h) => U.toTemp(h.feels));
+  const tops = hrs.map((h) => U.toTemp(tempAtTop(h.feels, climb)));
+  const stepT = U.metric() ? 5 : 10;
+  let lo = Math.floor((Math.min(...tops, ...base) - 2) / stepT) * stepT;
+  let hi = Math.ceil((Math.max(...base, ...tops) + 2) / stepT) * stepT;
+  if (hi - lo < stepT * 2) hi = lo + stepT * 2;
   const y = (f) => T + ((hi - f) / (hi - lo)) * (H - T - B);
   const line = (vals) => vals.map((v, i) => `${i ? "L" : "M"}${x(hrs[i].time).toFixed(1)},${y(v).toFixed(1)}`).join("");
   const ticks = [];
-  for (let f = lo; f <= hi; f += 10) ticks.push(f);
+  for (let f = lo; f <= hi; f += stepT) ticks.push(f);
   const step = hrs.length > 12 ? 3 : 2;
   const night = (d) => d < p.first.sunrise || d > p.first.sunset;
   const clampX = (d) => Math.max(L, Math.min(W - R, x(d)));
@@ -794,6 +1079,7 @@ function weatherChart(p) {
     { at: mid(p.finish), label: p.inputs.ending === "oneway" ? "End" : "Finish" },
   ].filter((m) => m.at.getTime() >= t0 && m.at.getTime() <= t1);
   const lastI = hrs.length - 1;
+  const fz = U.toTemp(32);
 
   return `
     <div class="chart" id="wx-chart">
@@ -803,22 +1089,22 @@ function weatherChart(p) {
           ${t0 < p.first.sunrise.getTime() ? `<rect class="night" x="${L}" y="${T}" width="${Math.max(0, clampX(p.first.sunrise) - L)}" height="${H - T - B}"/>` : ""}
           ${p.first.sunset.getTime() < t1 ? `<rect class="night" x="${clampX(p.first.sunset)}" y="${T}" width="${W - R - clampX(p.first.sunset)}" height="${H - T - B}"/>` : ""}
           ${ticks.map((f) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(f)}" y2="${y(f)}"/><text class="axis" x="${L - 6}" y="${y(f) + 4}" text-anchor="end">${f}°</text>`).join("")}
-          ${32 > lo && 32 < hi ? `<line class="freeze" x1="${L}" x2="${W - R}" y1="${y(32)}" y2="${y(32)}"/><text class="axis" x="${W - R}" y="${y(32) - 4}" text-anchor="end">Freezing 32°</text>` : ""}
+          ${fz > lo && fz < hi ? `<line class="freeze" x1="${L}" x2="${W - R}" y1="${y(fz)}" y2="${y(fz)}"/><text class="axis" x="${W - R}" y="${y(fz) - 4}" text-anchor="end">Freezing ${U.freezing()}</text>` : ""}
           ${marks.map((m) => `<line class="mark" x1="${x(m.at)}" x2="${x(m.at)}" y1="${T}" y2="${H - B}"/><text class="mark-label" x="${x(m.at) + 4}" y="${T + 11}">${m.label} ~${fmtTime(m.at)}</text>`).join("")}
           ${hrs.map((h, i) => (i % step ? "" : `<text class="axis" x="${x(h.time)}" y="${H - 10}" text-anchor="middle">${fmtTime(h.time).replace(":00", "")}</text>`)).join("")}
-          <path class="ln s1" d="${line(hrs.map((h) => h.feels))}"/>
+          <path class="ln s1" d="${line(base)}"/>
           <path class="ln s2" d="${line(tops)}"/>
-          <circle class="dot s1" cx="${x(hrs[lastI].time)}" cy="${y(hrs[lastI].feels)}" r="4"/>
+          <circle class="dot s1" cx="${x(hrs[lastI].time)}" cy="${y(base[lastI])}" r="4"/>
           <circle class="dot s2" cx="${x(hrs[lastI].time)}" cy="${y(tops[lastI])}" r="4"/>
           <line class="cross" id="wx-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
           <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
         </svg>
         <div class="tip" id="wx-tip" hidden></div>
       </div>
-      <p class="small muted">Shaded = dark. The top line is estimated from your climb (about 3.5°F colder per 1,000 ft).</p>
+      <p class="small muted">Shaded = dark. The top line is estimated from your climb (${U.metric() ? "about 6.5°C colder per 1,000 m" : "about 3.5°F colder per 1,000 ft"}).</p>
       <div class="hour-strip">${hrs.map((h) => `
         <div class="hour"><div class="h-time">${fmtTime(h.time).replace(":00", "")}</div><div class="h-icon">${weatherIcon(h.code, night(h.time))}</div>
-          <div class="h-temp">${Math.round(h.feels)}°</div><div class="h-sub">💧${h.rain}%</div><div class="h-sub">💨${Math.round(h.gust)}</div></div>`).join("")}
+          <div class="h-temp">${U.deg(h.feels)}</div><div class="h-sub">💧${h.rain}%</div><div class="h-sub">💨${U.speed(h.gust).split(" ")[0]}</div></div>`).join("")}
       </div>
       <details class="no-print"><summary>Show as a table</summary>${hourlyTable(hrs)}</details>
     </div>`;
@@ -852,10 +1138,10 @@ function wireChart(p) {
     };
     const head = document.createElement("div"); head.className = "tip-head";
     head.textContent = `${fmtTime(h.time)} · ${describeWeather(h.code)}`; tip.appendChild(head);
-    row(`${Math.round(h.feels)}°F`, "trailhead", "s1");
-    row(`${Math.round(tempAtTop(h.feels, climb))}°F`, "top", "s2");
+    row(U.temp(h.feels), "trailhead", "s1");
+    row(U.temp(tempAtTop(h.feels, climb)), "top", "s2");
     row(`${h.rain}%`, "chance of rain");
-    row(`${Math.round(h.wind)} / ${Math.round(h.gust)} mph`, "wind / gusts");
+    row(`${U.speed(h.wind)} / ${U.speed(h.gust)}`, "wind / gusts");
     const left = (cx / 700) * r.width;
     tip.style.left = `${Math.min(Math.max(left + 10, 0), r.width - 170)}px`;
   };
@@ -868,21 +1154,83 @@ function wireChart(p) {
 
 function hourlyTable(hours) {
   return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Sky</th><th>Temp</th><th>Feels</th><th>Rain</th><th>Wind / gust</th><th>UV</th></tr></thead><tbody>
-    ${hours.map((h) => `<tr class="${isThunder(h.code) ? "danger-row" : ""}"><td>${fmtTime(h.time)}</td><td>${describeWeather(h.code)}</td><td>${Math.round(h.temp)}°</td><td>${Math.round(h.feels)}°</td><td>${h.rain}%</td><td>${Math.round(h.wind)} / ${Math.round(h.gust)} mph</td><td>${Math.round(h.uv)}</td></tr>`).join("")}
+    ${hours.map((h) => `<tr class="${isThunder(h.code) ? "danger-row" : ""}"><td>${fmtTime(h.time)}</td><td>${describeWeather(h.code)}</td><td>${U.deg(h.temp)}</td><td>${U.deg(h.feels)}</td><td>${h.rain}%</td><td>${U.speed(h.wind).split(" ")[0]} / ${U.speed(h.gust)}</td><td>${Math.round(h.uv)}</td></tr>`).join("")}
   </tbody></table></div>`;
 }
 
 function dailyCards(days) {
   return `<div class="day-cards">${days.map((d) => `
     <div class="day-card"><div class="h-time">${fmtDay(parseLocal(d.date + "T12:00"))}</div><div class="d-icon">${weatherIcon(d.code, false)}</div>
-      <div><b>${Math.round(d.max)}°</b> / ${Math.round(d.min)}°</div><div class="small muted">${describeWeather(d.code)}${d.snowCm ? ` · ${Math.round(d.snowCm)} cm snow` : ""}</div>
+      <div><b>${U.deg(d.max)}</b> / ${U.deg(d.min)}</div><div class="small muted">${describeWeather(d.code)}${d.snowCm ? ` · ${Math.round(d.snowCm)} cm snow` : ""}</div>
       <div class="small muted">☀ ${fmtTime(d.sunrise)} – ${fmtTime(d.sunset)}</div></div>`).join("")}</div>`;
 }
 
 function gearList(items) {
   const groups = [...new Set(items.map((g) => g.group))];
-  return groups.map((grp) => `<h4 class="gear-group">${grp}</h4><ul class="gear">${items.filter((g) => g.group === grp)
+  return `<p id="packed" class="packed small">Tick things off as you pack</p>` + groups.map((grp) => `<h4 class="gear-group">${grp}</h4><ul class="gear">${items.filter((g) => g.group === grp)
     .map((g) => `<li><label><input type="checkbox"> <b>${g.item}</b></label><span class="small muted">${g.why}</span></li>`).join("")}</ul>`).join("");
+}
+
+// ---------- Fun bits ----------
+// A short burst of confetti and a toast when a plan is ready. Skipped for people who turn off motion.
+function celebrate(text) {
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.setAttribute("role", "status");
+  toast.textContent = text;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2600);
+  navigator.vibrate?.([10, 40, 10]);
+  if (reduceMotion()) return;
+  const cv = document.createElement("canvas");
+  cv.className = "confetti";
+  document.body.appendChild(cv);
+  const s = devicePixelRatio || 1, ctx = cv.getContext("2d");
+  cv.width = innerWidth * s; cv.height = innerHeight * s; ctx.scale(s, s);
+  const colors = ["#2f7d62", "#f0a35e", "#f7d34a", "#5aa7de", "#e86f6f", "#9bd17a"];
+  const bits = Array.from({ length: 90 }, (_, i) => ({
+    x: innerWidth / 2 + (Math.random() - 0.5) * 60, y: innerHeight * 0.35,
+    vx: (Math.random() - 0.5) * 12, vy: -6 - Math.random() * 9, r: 3 + Math.random() * 4,
+    spin: Math.random() * 6, vs: (Math.random() - 0.5) * 0.4, c: colors[i % colors.length],
+  }));
+  const t0 = performance.now();
+  const draw = (now) => {
+    const t = now - t0;
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (const b of bits) {
+      b.vy += 0.35; b.x += b.vx; b.y += b.vy; b.vx *= 0.99; b.spin += b.vs;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.spin);
+      ctx.globalAlpha = Math.max(0, 1 - t / 1800); ctx.fillStyle = b.c;
+      ctx.fillRect(-b.r, -b.r / 2, b.r * 2, b.r); ctx.restore();
+    }
+    if (t < 1800) requestAnimationFrame(draw); else cv.remove();
+  };
+  requestAnimationFrame(draw);
+}
+
+// The big time counts up when the plan appears.
+function countUp(el) {
+  if (!el || reduceMotion()) return;
+  const to = +el.dataset.to, t0 = performance.now();
+  const tick = (now) => {
+    const k = Math.min(1, (now - t0) / 700);
+    el.textContent = formatDuration(Math.max(0.05, to * (1 - (1 - k) ** 3)));
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// Share the plan as text (the phone's share sheet, or copy to clipboard).
+async function shareTrip(p, inputs) {
+  const text = `🥾 ${state.place.name}, ${fmtDay(p.start)}\n` +
+    `Start ${fmtTime(p.start)} · back ${fmtRange(p.finish)} · sunset ${fmtTime(p.first.sunset)}\n` +
+    `${U.dist(p.est.totalMiles)}, ${U.elev(p.est.totalGainFt)} up · water ${p.water.total[0]}–${p.water.total[1]} L\n` +
+    `Planned with hikepace: https://suhibug.github.io/hikepace/`;
+  track("share");
+  try {
+    if (navigator.share) await navigator.share({ title: "My hike plan", text });
+    else { await navigator.clipboard.writeText(text); celebrate("Copied! Paste it to your hiking buddy 📋"); }
+  } catch { /* closed the share sheet */ }
 }
 
 // ---------- Saved trips (work offline) ----------
@@ -896,32 +1244,33 @@ function storeTrips(trips) {
 function saveTrip() {
   track("save-trip");
   const trips = loadTrips().filter((t) => !(t.place.name === state.place.name && t.inputs.date === state.inputs.date));
-  trips.unshift({ id: Date.now(), savedAt: new Date().toISOString(), place: state.place, inputs: state.inputs, forecast: state.forecast });
+  trips.unshift({ id: Date.now(), savedAt: new Date().toISOString(), place: state.place, inputs: state.inputs, forecast: state.forecast, route: state.route });
   if (!storeTrips(trips.slice(0, 20))) return alert("Could not save on this device.");
   $("save-btn").textContent = "Saved ✓";
+  celebrate("Saved! Works without signal 📶");
   renderSaved();
 }
 
 function tripMiles(raw) {
   const i = normalizeInputs(raw);
-  return Math.round((i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles)) * 10) / 10;
+  return i.upMiles + (i.ending === "outback" ? i.upMiles : i.backMiles);
 }
 
 function renderSaved() {
   const trips = loadTrips();
   $("saved").hidden = !trips.length;
   $("saved-list").innerHTML = trips.map((t) => `
-    <li><button type="button" data-open="${t.id}">${t.place.name} · ${t.inputs.date} · ${tripMiles(t.inputs)} mi</button>
+    <li><button type="button" data-open="${t.id}">🗺️ ${esc(t.place.name)} · ${t.inputs.date} · ${U.dist(tripMiles(t.inputs))}</button>
     <button type="button" class="link" data-del="${t.id}">Delete</button></li>`).join("");
 }
 
 $("saved-list").addEventListener("click", (e) => {
-  const open = e.target.dataset.open, del = e.target.dataset.del;
+  const open = e.target.closest("[data-open]")?.dataset.open, del = e.target.closest("[data-del]")?.dataset.del;
   const trips = loadTrips();
   if (open) {
     const t = trips.find((x) => String(x.id) === open);
-    Object.assign(state, { place: t.place, inputs: t.inputs, forecast: t.forecast });
-    render(new Date(t.savedAt).toLocaleString());
+    Object.assign(state, { place: t.place, inputs: t.inputs, forecast: t.forecast, route: t.route || null, savedName: new Date(t.savedAt).toLocaleString() });
+    render(state.savedName);
   }
   if (del) {
     storeTrips(trips.filter((x) => String(x.id) !== del));
@@ -936,14 +1285,15 @@ $("gpx-help-link").addEventListener("click", (e) => {
   e.preventDefault();
   const box = $("gpx-help");
   box.hidden = !box.hidden;
-  box.innerHTML = `A GPX file is a route saved as a file. Free ways to get one:
+  box.innerHTML = `A GPX file is a route saved as a file. You usually don't need one: just search the trail's name. If you have one:
     <ul>
-      <li><b>CalTopo</b> (caltopo.com, free account): draw the trail on the map, then export it as GPX.</li>
-      <li><b>Garmin, Coros or Apple Watch</b>: a hike you recorded can usually be exported as GPX from the watch's app or website.</li>
-      <li><b>AllTrails</b>: some trail pages let you download the route as GPX (this may need their paid membership).</li>
-    </ul>
-    No file? Just type the miles and climb below.`;
+      <li><b>Garmin, Coros, Apple Watch or Strava</b>: a hike you recorded can be exported as GPX, and hikepace learns your pace from it.</li>
+      <li><b>CalTopo</b> (free account): draw the route on the map, then export it as GPX.</li>
+      <li><b>AllTrails</b>: some trail pages let you download the route (may need their paid membership).</li>
+    </ul>`;
 });
+showUnits();
+renderPaceCards();
 showPace();
 updateForm();
 const today = new Date();
